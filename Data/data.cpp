@@ -1,6 +1,10 @@
 #include "data.h"
+
 #include <fstream>
 #include <sstream>
+#include <mutex>
+#include <thread>
+
 #include <pcap.h>
 
 namespace DataCollection
@@ -88,6 +92,116 @@ namespace DataCollection
             // handle necessary exception
             std::cerr << "Error: Error during metadata collection: " << e.what() << std::endl;
             return "Error: Metadata collection failed";
+        }
+    }
+
+    PacketCollector::PacketCollector(const std::vector<std::string>& networkInterfaces, int packetCount)
+        : networkInterfaces(networkInterfaces), packetCount(packetCount) {}
+
+
+    std::string PacketCollector::CollectData() 
+    {
+        try
+        {
+            // initialize a vector to hold packet details from each thread
+            std::vector<std::string> packetDetailsList(networkInterfaces.size());
+
+            // a mutex to protect shared data
+            std::mutex mutex;
+
+            // a vector to hold thread objects
+            std::vector<std::thread> threads;
+
+            // create a thread for each network interface
+            for (size_t i = 0; i < networkInterfaces.size(); ++i)
+            {
+                threads.emplace_back([&, i]()
+                {
+                    try
+                    {
+                        // open the network interface for packet capture
+                        char errbuf[PCAP_ERRBUF_SIZE];
+                        pcap_t* pcapHandle = pcap_open_live(networkInterfaces[i].c_str(), BUFSIZ, 1, 1000, errbuf);
+
+                        if (pcapHandle == nullptr)
+                        {
+                            std::cerr << "Error: Failed to open network interface: " << errbuf << std::endl;
+                            return;
+                        }
+
+                        //capture packets
+                        struct pcap_pkthdr header;
+                        const u_char* packet;
+                        int packetNumber = 0;
+                        std::stringstream packetDetails;
+
+                        while (packetNumber < packetCount)
+                        {
+                            packet = pcap_next(pcapHandle, &header);
+
+                            if (packet == nullptr)
+                            {
+                                continue; // no packet captured , try agaiin
+                            }
+
+                            // buffer to store the formatted timestamp
+                            char timestampBuffer[26];
+
+                            // process the captured packet e.g print packet details
+                            packetDetails << "Interface " << networkInterfaces[i] << "- Packet" << packetNumber + 1 << ":\n";
+                            packetDetails << " - Length: " << header.len << "bytes\n";
+                            packetDetails << " - Captured Length: " << header.caplen << "bytes\n";
+
+                            if (ctime_s(timestampBuffer, sizeof(timestampBuffer), (const time_t*)&header.ts.tv_sec) == 0)
+                            {
+                                packetDetails << " - Timestamp: " << timestampBuffer;
+                            }
+                            else
+                            {
+                                packetDetails << " - Timestamp: Error formatting timestamp";
+                            }
+
+                            //you can add more packet processing logic
+
+                            packetNumber++;
+                        }
+
+                        // close the pcap session
+                        pcap_close(pcapHandle);
+
+                        // store the packet details in the shared vector
+                        std::lock_guard<std::mutex> lock(mutex);
+                        packetDetailsList[i] = packetDetails.str();
+                    }
+
+                    catch (const std::exception& e)
+                    {
+                        // handle exceptions
+                        std::cerr << "Error in thread" << ": " << e.what() << std::endl;
+                    }
+                });
+            }
+
+            // wait for all threads to finish
+            for (auto& thread : threads)
+            {
+                thread.join();
+            }
+
+            // combine packet details from all threads
+            std::stringstream combinedPacketDetails;
+            for (const auto& details : packetDetailsList)
+            {
+                combinedPacketDetails << details << "\n";
+            }
+
+            return combinedPacketDetails.str();
+        }
+        catch (const std::exception e)
+        {
+            //handle exceptions
+            std::cerr << "Error: Exception occurred during packet collection: " << e.what() << std::endl;
+            return "Error: Packet collection failed";
         }
     }
 

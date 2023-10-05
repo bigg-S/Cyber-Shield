@@ -27,11 +27,11 @@ namespace DataCollection
     class PacketCollector
     {
     private:
-        std::string networkInterface;
+        const std::vector<std::string>& networkInterfaces;
         int packetCount;
 
     public:
-        PacketCollector(const std::string& networkInterface, int packetCount);
+        PacketCollector(const std::vector<std::string>& networkInterfaces, int packetCount);
         std::string CollectData();
     };
 
