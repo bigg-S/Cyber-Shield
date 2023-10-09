@@ -9,6 +9,28 @@ namespace DataCollection
     {
         try
         {
+            // initialize a buffer to store the PATH variable value
+            char* pathBuffer = nullptr;
+            size_t requiredSize;
+
+            // Use _dupenv_s to get the value of the PATH variable
+            if (_dupenv_s(&pathBuffer, &requiredSize, "PATH") == 0 && pathBuffer != nullptr)
+            {
+                // successfully retrieved the path variable value
+                std::string originalPath(pathBuffer);
+
+                // now the original path can be modified as needed
+
+                // free the allocated buffer when done
+                free(pathBuffer);
+            }
+            else
+            {
+                // Handle the case where _dupenv_s fails to retrieve the PATH variable
+                //You can provide a default PATH value or handle the error accordingly
+                std::cerr << "Failed to retrieve the PATH variable." << std::endl;
+            }
+
             // build the nmap command
             std::string command = "nmap " + options + " " + target;
 
@@ -38,6 +60,103 @@ namespace DataCollection
             std::cerr << "Error: " << e.what() << std::endl;
             return "Error: Network scan failed";
         }
+    }
+
+    bool isIpAddressInNetwork(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask) 
+    {
+        // compare the Ip address and network identifier using the subnet mask
+
+        // implementation for ipv4 addresses
+        struct in_addr ipAddr;
+        struct in_addr networkAddr;
+        struct in_addr subnetMaskAddr;
+
+        inet_pton(AF_INET, ipAddress.c_str(), &ipAddr);
+        inet_pton(AF_INET, networkId.c_str(), &networkAddr);
+        inet_pton(AF_INET, subnetMask.c_str(), &subnetMaskAddr);
+
+        // apply the subnet mask to the ip address
+        uint32_t maskedIpAddress = ntohl(ipAddr.s_addr) & ntohl(subnetMaskAddr.s_addr);
+
+        // apply the subnet mask to the network identifier
+        uint32_t maskedNetworkIdentifier = ntohl(networkAddr.s_addr) & ntohl(subnetMaskAddr.s_addr);
+
+        // compare the masked ip address and masked network identifier
+        return maskedIpAddress == maskedNetworkIdentifier;
+    }
+
+    bool IsInterfaceInNetwork(pcap_if_t* dev, const std::string& networkId)
+    {
+        // get ip address and subnet mask from the interface
+        for (pcap_addr* addr = dev->addresses; addr != nullptr; addr = addr->next)
+        {
+            if (addr->addr->sa_family == AF_INET) //IPv4 address
+            {
+                // convert the IP address and subnet mask to string representation
+                char ipAdress[INET_ADDRSTRLEN];
+                char subnetMask[INET_ADDRSTRLEN];
+
+                inet_ntop(AF_INET, &(reinterpret_cast<struct sockaddr_in*>(addr->addr))->sin_addr, subnetMask, INET_ADDRSTRLEN);
+                inet_ntop(AF_INET, &(reinterpret_cast<struct sockaddr_in*>(addr->netmask))->sin_addr, subnetMask, INET_ADDRSTRLEN);
+
+                //compare the ip address with the identifier
+                if (isIpAddressInNetwork(ipAdress, networkId, subnetMask))
+                {
+                    return true;
+                }
+            }
+
+            // add similar logic for ipv6
+        }
+
+        return false;
+    }
+
+    std::vector<NetworkInterface> GetNetworkInterfaces(const std::string& networkId)
+    {
+        std::vector<NetworkInterface> networkInterfaces;
+
+        pcap_if_t* allDevs;
+        char errbuf[PCAP_ERRBUF_SIZE];
+
+        //retrieve the list of network interfaces
+        if (pcap_findalldevs(&allDevs, errbuf) == -1)
+        {
+            std::cerr << "Failed to retrieve network interfaces" << errbuf << std::endl;
+            return networkInterfaces;
+        }
+
+        pcap_if_t* dev;
+        int i = 0;
+
+        // iterate through the list of network interfaces
+        for (dev = allDevs; dev != NULL; dev->next)
+        {
+            // check if the network identifier matchhes the interfaces IP address or subnet
+            bool isInNetwork = IsInterfaceInNetwork(dev, networkId);
+
+            if (isInNetwork)
+            {
+                NetworkInterface networkInterface;
+                networkInterface.interfaceName = dev->name;
+
+                if (dev->description)
+                {
+                    networkInterface.interfaceDescription = dev->description;
+                }
+                else
+                {
+                    networkInterface.interfaceDescription = "N/A";
+                }
+
+                networkInterfaces.push_back(networkInterface);
+            }
+        }
+
+        // free the list of network interfaces
+        pcap_freealldevs(allDevs);
+
+        return networkInterfaces;
     }
 
     // network logs
@@ -503,6 +622,9 @@ namespace DataCollection
             return endpointData;  // You may define an error state in the struct
         }
     }
+
+
+
 
 
 }

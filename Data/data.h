@@ -26,7 +26,8 @@ namespace DataCollection
     };
 
     // Define the structure for the IP header
-    struct IpHeader {
+    struct IpHeader 
+    {
         uint8_t version;               // IP version (e.g., 4 for IPv4, 6 for IPv6)
         uint8_t headerLength;          // Header length in 32-bit words
         uint8_t tos;                   // Type of Service (TOS)
@@ -41,7 +42,8 @@ namespace DataCollection
     };
 
     // Define the structure for a network packet
-    struct NetworkPacket {
+    struct NetworkPacket 
+    {
         std::string networkInterface;      // Interface from which the packet is captured
         EthernetHeader ethernetHeader;    // Ethernet header
         IpHeader ipHeader;                // IP header
@@ -58,7 +60,8 @@ namespace DataCollection
 
 
     // Define a structure to represent endpoint data
-    struct EndpointData {
+    struct EndpointData 
+    {
         std::string endpointName;
         std::string hostname;
         std::string macAddress;
@@ -74,8 +77,71 @@ namespace DataCollection
         std::string location;
     };
 
+    // **************Properties of a network interface*****************//
+    struct NetworkStatistics
+    {
+        int packetsTransmitted;
+        int packetsReceived;
+        int errors;
+    };
+
+    struct VLANConfig
+    {
+        std::string vlanId;
+        std::string vlanName;
+    };
+
+    struct FirewallSettings
+    {
+        bool enabled;
+        std::string ruleSet;
+    };
+
+    struct Ipv6Settings
+    {
+        std::string ipv6Address;
+        std::string ipv6Gateway;
+    };
+
+    struct WirelessProperties
+    {
+        std::string ssid;
+        std::string signalStrength;
+        std::string encryptionType;
+    };
+
+    // **************End of Properties of a network interface*****************//
+
+    // Network interface
+    struct NetworkInterface
+    {
+        std::string interfaceName;
+        std::string interfaceType;
+        std::string macAddress;
+        std::string ipAddress;
+        std::string subnetMask;
+        std::string defaultGateway;
+        std::string dnsIp;
+        std::string maxTransmissionUnit;
+        std::string speed;
+        std::string state;
+        std::string interfaceDescription;
+
+        NetworkStatistics networkStatistics;
+        VLANConfig vlanConfig;
+        FirewallSettings firewallSettings;
+        Ipv6Settings ipv6Settings;
+        WirelessProperties wirelessProperties;
+    };    
+
+    bool isIpAddressInNetwork(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask);
+
+    bool IsInterfaceInNetwork(pcap_if_t* dev, const std::string& networkId);
+    
+    std::vector<NetworkInterface> GetNetworkInterfaces(const std::string& networkId);
 
     std::string NetworkScan(const std::string& target, const std::string& options);
+
 
 
     class LogCollector
