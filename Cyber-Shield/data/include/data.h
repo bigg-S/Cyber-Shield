@@ -6,6 +6,7 @@
 #include <mutex>
 #include <thread>
 #include <array>
+#include <map>
 #include <stdio.h>
 #include <cstdint>
 
@@ -126,6 +127,7 @@ namespace DataCollection
         std::string speed;
         std::string state;
         std::string interfaceDescription;
+        pcap_t* pcapHandle = nullptr;
 
         NetworkStatistics networkStatistics;
         VLANConfig vlanConfig;
@@ -188,17 +190,31 @@ namespace DataCollection
         std::string CollectData();
     };
 
+
     // collecting network packets
     class PacketCollector
     {
     private:
-        const std::vector<std::string>& networkInterfaces;
+        const std::vector<NetworkInterface>& networkInterfaces;
         int packetCount;
+        pcap_t* pcapHandle = nullptr;
+        bool isCapturing;
+        std::map<std::string, std::vector<NetworkPacket>> capturedPackets;
+        std::vector<std::thread> threads;
+        std::mutex capturedPacketsMutex;
+
+        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header);
 
     public:
-        PacketCollector(const std::vector<std::string>& networkInterfaces, int packetCount);
-        std::vector<std::vector<NetworkPacket>> CollectData();
+        PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, int packetCount);
+        ~PacketCollector();
+
+        void StartCapture();
+        void StopCapture();
+        void CapturePackets(NetworkInterface& iface);
+        std::map<std::string, std::vector<NetworkPacket>> GetCapturedPackets();
     };
+
     
     // collecting network endpoint data
     class EndpointDataCollector

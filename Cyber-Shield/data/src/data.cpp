@@ -341,247 +341,233 @@ namespace DataCollection
     }
 
 
-    PacketCollector::PacketCollector(const std::vector<std::string>& networkInterfaces, int packetCount)
+    PacketCollector::PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, int packetCount)
         : networkInterfaces(networkInterfaces), packetCount(packetCount) {}
 
-    std::vector<std::vector<NetworkPacket>> PacketCollector::CollectData()
+    PacketCollector::~PacketCollector()
     {
-        try
+        if (isCapturing)
         {
-            // Initialize a vector to hold packet details from each thread
-            std::vector<std::vector<NetworkPacket>> packetDetailsList(networkInterfaces.size());
+            StopCapture();
+        }
+    }
 
-            // A mutex to protect shared data
-            std::mutex mutex;
+    // start packet capture method
+    void PacketCollector::StartCapture()
+    {
+        // check if packet capturing is in progress
+        if (isCapturing)
+        {
+            std::cerr << "Already capturing" << std::endl;
+            return;
+        }        
 
-            // A vector to hold thread objects
-            std::vector<std::thread> threads;
+        // start a capture thread for each network interface
+        for (auto& iface : networkInterfaces)
+        {
+            threads.emplace_back(&PacketCollector::CapturePackets, this, std::ref(iface));
 
-            // Create a thread for each network interface
-            for (int i = 0; i < networkInterfaces.size(); ++i)
-            {
-                threads.emplace_back([=, &packetDetailsList, &mutex]()
-                    {
-                        try
-                {
-                    // Open the network interface for packet capture
-                    char errbuf[PCAP_ERRBUF_SIZE];
-                    pcap_t* pcapHandle = pcap_open_live(networkInterfaces[i].c_str(), BUFSIZ, 1, 1000, errbuf);
+            isCapturing = true;
 
-                    if (pcapHandle == nullptr)
-                    {
-                        std::cerr << "Error: Failed to open network interface: " << errbuf << std::endl;
-                        return;
-                    }
-
-                    // Capture packets
-                    struct pcap_pkthdr header;
-                    const u_char* packetData;
-                    int packetNumber = 0;
-
-                    while (packetNumber < packetCount)
-                    {
-                        packetData = pcap_next(pcapHandle, &header);
-
-                        if (packetData == nullptr)
-                        {
-                            packetNumber++;
-                            continue; // No packet captured, try again
-                        }
-
-                        NetworkPacket pDetails;
-                        pDetails.networkInterface = networkInterfaces[i];
-                        pDetails.packetNumber = packetNumber + 1;
-
-                        // Buffer to store the formatted timestamp
-                        char timestampBuffer[26];
-
-                        if (ctime_s(timestampBuffer, sizeof(timestampBuffer), (const time_t*)&header.ts.tv_sec) == 0)
-                        {
-                            pDetails.timestamp = timestampBuffer;
-                        }
-                        else
-                        {
-                            pDetails.timestamp = "Error formatting timestamp";
-                        }
-
-                        // Extract packet data based on the type of interface
-                        if (pDetails.networkInterface == "eth0")
-                        {
-                            // Assuming Ethernet frame size is at least 14 bytes (size of Ethernet header)
-                            if (header.caplen >= 14)
-                            {
-                                const u_char* ethHeader = packetData;
-                                const u_char* ipHeader = packetData + 14; // Skip Ethernet header
-                                struct IpHeader* ip = (struct IpHeader*)ipHeader;
-
-                                // Extract IP header fields
-                                pDetails.ipHeader.version = (ip->version >> 4) & 0x0F;
-                                pDetails.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
-                                pDetails.ipHeader.tos = ip->tos;
-                                pDetails.ipHeader.totalLength = ntohs(ip->totalLength);
-                                pDetails.ipHeader.identification = ntohs(ip->identification);
-                                pDetails.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
-                                pDetails.ipHeader.ttl = ip->ttl;
-                                pDetails.ipHeader.protocol = ip->protocol;
-                                pDetails.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
-
-                                // Convert IP addresses to string representations
-                                char sourceIpString[INET_ADDRSTRLEN];
-                                char destinationIpString[INET_ADDRSTRLEN];
-
-                                inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
-                                inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
-
-                                pDetails.ipHeader.sourceIp = sourceIpString;
-                                pDetails.ipHeader.destinationIp = destinationIpString;
-
-                                // You may also extract other fields depending on your requirements
-
-                                // Assuming payload follows the IP header
-                                const u_char* payload = packetData + 14 + (ip->headerLength * 4); // Skip Ethernet + IP header
-
-                                // Copy payload data to the NetworkPacket
-                                pDetails.applicationData.assign(payload, payload + header.caplen - 14 - (ip->headerLength * 4));
-
-                                // Store the packet details in the shared vector
-                                std::lock_guard<std::mutex> lock(mutex);
-                                packetDetailsList[0].push_back(pDetails);
-                            }
-                        }
-                        else if (pDetails.networkInterface == "wlan0")
-                        {
-                            // Assuming Wi-Fi frame size is at least 24 bytes (size of Wi-Fi header)
-                            if (header.caplen >= 24)
-                            {
-                                const u_char* wifiHeader = packetData;
-
-                                // Extract the frame control field (2 bytes)
-                                uint16_t frameControl = wifiHeader[0] | (wifiHeader[1] << 8);
-
-                                // Check if it's an IP packet (assuming it's an IPv4 packet)
-                                if ((frameControl & 0x0F00) == 0x0800)
-                                {
-                                    const u_char* ipHeader = packetData + 24; // Skip Wi-Fi header
-                                    struct IpHeader* ip = (struct IpHeader*)ipHeader;
-
-                                    // Extract IP header fields
-                                    pDetails.ipHeader.version = (ip->version >> 4) & 0x0F;
-                                    pDetails.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
-                                    pDetails.ipHeader.tos = ip->tos;
-                                    pDetails.ipHeader.totalLength = ntohs(ip->totalLength);
-                                    pDetails.ipHeader.identification = ntohs(ip->identification);
-                                    pDetails.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
-                                    pDetails.ipHeader.ttl = ip->ttl;
-                                    pDetails.ipHeader.protocol = ip->protocol;
-                                    pDetails.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
-
-                                    // Convert IP addresses to string representations
-                                    char sourceIpString[INET_ADDRSTRLEN];
-                                    char destinationIpString[INET_ADDRSTRLEN];
-
-                                    inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
-                                    inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
-
-                                    pDetails.ipHeader.sourceIp = sourceIpString;
-                                    pDetails.ipHeader.destinationIp = destinationIpString;
-
-                                    // Assuming payload follows the IP header
-                                    const u_char* payload = packetData + 20; // Skip Wi-Fi + IP header (assuming IP header is 20 bytes)
-
-                                    // Calculate the payload length
-                                    uint16_t payloadLength = header.caplen - 24 - 20; // Skip Wi-Fi header and IP header
-
-                                    // Copy payload data to the NetworkPacket
-                                    pDetails.applicationData.assign(payload, payload + payloadLength);
-
-                                    // Store the packet details in the shared vector
-                                    std::lock_guard<std::mutex> lock(mutex);
-                                    packetDetailsList[1].push_back(pDetails);
-                                }
-                            }
-                        }
-
-                        else if (pDetails.networkInterface == "virtnet0")
-                        {
-                            // Logic for virtual network interface packet extraction
-                            // You need to handle the format of virtual network packets here.
-
-                            // Assuming the virtual network packet format includes an IP header
-                            if (header.caplen >= sizeof(struct IpHeader))
-                            {
-                                const u_char* ipHeader = packetData;
-                                struct IpHeader* ip = (struct IpHeader*)ipHeader;
-
-                                // Extract IP header fields
-                                pDetails.ipHeader.version = (ip->version >> 4) & 0x0F;
-                                pDetails.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
-                                pDetails.ipHeader.tos = ip->tos;
-                                pDetails.ipHeader.totalLength = ntohs(ip->totalLength);
-                                pDetails.ipHeader.identification = ntohs(ip->identification);
-                                pDetails.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
-                                pDetails.ipHeader.ttl = ip->ttl;
-                                pDetails.ipHeader.protocol = ip->protocol;
-                                pDetails.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
-
-                                // Convert IP addresses to string representations
-                                char sourceIpString[INET_ADDRSTRLEN];
-                                char destinationIpString[INET_ADDRSTRLEN];
-
-                                inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
-                                inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
-
-                                pDetails.ipHeader.sourceIp = sourceIpString;
-                                pDetails.ipHeader.destinationIp = destinationIpString;
-
-                                // You may also need to handle the payload format for virtual network packets
-
-                                // Assuming payload follows the IP header
-                                const u_char* payload = packetData + sizeof(struct IpHeader); // Skip IP header
-
-                                // Copy payload data to the NetworkPacket
-                                pDetails.applicationData.assign(payload, payload + header.caplen - sizeof(struct IpHeader));
-
-                                // Store the packet details in the shared vector
-                                std::lock_guard<std::mutex> lock(mutex);
-                                packetDetailsList[2].push_back(pDetails);
-                            }
-                        }
-
-                        // You can add more packet processing logic
-
-                        packetNumber++;
-                    }
-
-                    // Close the pcap session
-                    pcap_close(pcapHandle);
-
-                }
-                catch (const std::exception& e)
-                {
-                    // Handle exceptions
-                    std::lock_guard<std::mutex> lock(mutex);
-                    std::cerr << "Error in thread" << ": " << e.what() << std::endl;
-                }
-                    });
-            }
-
-            // Wait for all threads to finish
+            // wait for all threads to finish
             for (auto& thread : threads)
             {
                 thread.join();
             }
-
-            return packetDetailsList;
+                
         }
-        catch (const std::exception& e)
+        
+    }
+
+    //stop packet capture
+    void PacketCollector::StopCapture()
+    {
+        if (!isCapturing)
         {
-            // Handle exceptions
-            std::cerr << "Error: Exception occurred during packet collection: " << e.what() << std::endl;
+            std::cerr << "Not currently capturing" << std::endl;
+            return;
         }
 
-        // If an error occurs or the function fails, return an empty vector
-        return {};
+        // signal the capture threads to stop
+        isCapturing = false;
+
+        // wait for all the threads to finish
+        for (auto& thread : threads)
+        {
+            thread.join();
+        }
+
+        // close the pcap handles for all interfaces
+        for (auto& iface : networkInterfaces)
+        {
+            if (iface.pcapHandle != nullptr)
+            {
+                pcap_close(iface.pcapHandle);
+            }
+        }
+    }
+
+    // packet capturing logic
+    void PacketCollector::CapturePackets(NetworkInterface& iface)
+    {
+        char errbuf[PCAP_ERRBUF_SIZE];
+        iface.pcapHandle = pcap_open_live(iface.interfaceName.c_str(), BUFSIZ, 1, 1000, errbuf);
+
+        if (iface.pcapHandle == nullptr)
+        {
+            std::cerr << "Error: Failed to open network interface (" << iface.interfaceName << "): " << errbuf << std::endl;
+            return;
+        }
+
+        // capture packets
+        std::vector<NetworkPacket> capturedPacketsArr;
+
+        while (isCapturing)
+        {
+            struct pcap_pkthdr header;
+            const u_char* packetData = pcap_next(iface.pcapHandle, &header);
+            if (packetData != nullptr)
+            {
+                NetworkPacket packet;
+                // Buffer to store the formatted timestamp
+                char timestampBuffer[26];
+
+                if (ctime_s(timestampBuffer, sizeof(timestampBuffer), (const time_t*)&header.ts.tv_sec) == 0)
+                {
+                    packet.timestamp = timestampBuffer;
+                }
+                else
+                {
+                    packet.timestamp = "Error formatting timestamp";
+                }
+
+                if (iface.interfaceDescription.find("Ethernet") != std::string::npos)
+                {
+                    // Assuming Ethernet frame size is at least 14 bytes (size of Ethernet header)
+                    if (header.caplen >= 14)
+                    {
+                        const u_char* ethHeader = packetData;
+                        const u_char* ipHeader = packetData + 14; // Skip Ethernet header
+                        struct IpHeader* ip = (struct IpHeader*)ipHeader;
+
+                        // Extract IP header fields
+                        packet.ipHeader.version = (ip->version >> 4) & 0x0F;
+                        packet.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
+                        packet.ipHeader.tos = ip->tos;
+                        packet.ipHeader.totalLength = ntohs(ip->totalLength);
+                        packet.ipHeader.identification = ntohs(ip->identification);
+                        packet.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
+                        packet.ipHeader.ttl = ip->ttl;
+                        packet.ipHeader.protocol = ip->protocol;
+                        packet.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
+
+                        // Convert IP addresses to string representations
+                        char sourceIpString[INET_ADDRSTRLEN];
+                        char destinationIpString[INET_ADDRSTRLEN];
+
+                        inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
+                        inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
+
+                        packet.ipHeader.sourceIp = sourceIpString;
+                        packet.ipHeader.destinationIp = destinationIpString;
+
+                        // You may also extract other fields depending on your requirements
+
+                        // Assuming payload follows the IP header
+                        const u_char* payload = packetData + 14 + (ip->headerLength * 4); // Skip Ethernet + IP header
+
+                        // Copy payload data to the NetworkPacket
+                        packet.applicationData.assign(payload, payload + header.caplen - 14 - (ip->headerLength * 4));
+
+                        // Store the packet details in the shared vector
+                        std::lock_guard<std::mutex> lock(capturedPacketsMutex);
+                        capturedPacketsArr.push_back(packet);
+                    }
+                }
+                else if (iface.interfaceDescription.find("Wi-Fi") != std::string::npos)
+                {
+                    // Buffer to store the formatted timestamp
+                    char timestampBuffer[26];
+
+                    if (ctime_s(timestampBuffer, sizeof(timestampBuffer), (const time_t*)&header.ts.tv_sec) == 0)
+                    {
+                        packet.timestamp = timestampBuffer;
+                    }
+                    else
+                    {
+                        packet.timestamp = "Error formatting timestamp";
+                    }
+
+                    // Assuming Wi-Fi frame size is at least 24 bytes (size of Wi-Fi header)
+                    if (header.caplen >= 24)
+                    {
+                        const u_char* wifiHeader = packetData;
+
+                        // Extract the frame control field (2 bytes)
+                        uint16_t frameControl = wifiHeader[0] | (wifiHeader[1] << 8);
+
+                        // Check if it's an IP packet (assuming it's an IPv4 packet)
+                        if ((frameControl & 0x0F00) == 0x0800)
+                        {
+                            const u_char* ipHeader = packetData + 24; // Skip Wi-Fi header
+                            struct IpHeader* ip = (struct IpHeader*)ipHeader;
+
+                            // Extract IP header fields
+                            packet.ipHeader.version = (ip->version >> 4) & 0x0F;
+                            packet.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
+                            packet.ipHeader.tos = ip->tos;
+                            packet.ipHeader.totalLength = ntohs(ip->totalLength);
+                            packet.ipHeader.identification = ntohs(ip->identification);
+                            packet.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
+                            packet.ipHeader.ttl = ip->ttl;
+                            packet.ipHeader.protocol = ip->protocol;
+                            packet.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
+
+                            // Convert IP addresses to string representations
+                            char sourceIpString[INET_ADDRSTRLEN];
+                            char destinationIpString[INET_ADDRSTRLEN];
+
+                            inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
+                            inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
+
+                            packet.ipHeader.sourceIp = sourceIpString;
+                            packet.ipHeader.destinationIp = destinationIpString;
+
+                            // Assuming payload follows the IP header
+                            const u_char* payload = packetData + 20; // Skip Wi-Fi + IP header (assuming IP header is 20 bytes)
+
+                            // Calculate the payload length
+                            uint16_t payloadLength = header.caplen - 24 - 20; // Skip Wi-Fi header and IP header
+
+                            // Copy payload data to the NetworkPacket
+                            packet.applicationData.assign(payload, payload + payloadLength);
+
+                            // Store the packet details in the shared vector
+                            std::lock_guard<std::mutex> lock(capturedPacketsMutex);
+                            capturedPacketsArr.push_back(packet);
+                        }
+                    }
+                }
+                else
+                {
+                    std::cerr << "Interface not valid";
+                    continue;
+                }
+
+            }
+            
+        }
+
+        std::lock_guard<std::mutex> lock(capturedPacketsMutex);
+        capturedPackets[iface.interfaceName] = capturedPacketsArr;
+
+        pcap_close(iface.pcapHandle);
+    }
+
+    std::map<std::string, std::vector<NetworkPacket>> PacketCollector::GetCapturedPackets()
+    {
+        std::lock_guard<std::mutex> lock(capturedPacketsMutex);
+        return capturedPackets;
     }
 
     EndpointDataCollector::EndpointDataCollector(const std::string& ipAddress) : ipAddress(ipAddress) {}
