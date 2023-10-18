@@ -119,48 +119,55 @@ namespace DataCollection
 
     bool NetworkHelperFunctions::IsInterfaceInNetwork(pcap_if_t* dev, const std::string& networkId)
     {
-        // get ip address and subnet mask from the interface
-        for (pcap_addr* addr = dev->addresses; addr != nullptr; addr = addr->next)
+        if (dev != nullptr)
         {
-            if (addr->addr->sa_family == AF_INET) //IPv4 address
+            // get ip address and subnet mask from the interface
+            for (pcap_addr* addr = dev->addresses; addr != nullptr; addr = addr->next)
             {
-                // convert the IP address and subnet mask to string representation
-                char ipAddress[INET_ADDRSTRLEN];
-                char subnetMask[INET_ADDRSTRLEN];
-
-                inet_ntop(AF_INET, &(reinterpret_cast<struct sockaddr_in*>(addr->addr))->sin_addr, subnetMask, INET_ADDRSTRLEN);
-                inet_ntop(AF_INET, &(reinterpret_cast<struct sockaddr_in*>(addr->netmask))->sin_addr, subnetMask, INET_ADDRSTRLEN);
-
-                // Ensure null-termination of the ipAddress string
-                ipAddress[INET_ADDRSTRLEN - 1] = '\0';
-
-                //compare the ip address with the identifier
-                if (IsIpAddressInNetwork(ipAddress, networkId, subnetMask))
+                if (addr->addr->sa_family == AF_INET) //IPv4 address
                 {
-                    return true;
+                    // convert the IP address and subnet mask to string representation
+                    char ipAddress[INET_ADDRSTRLEN];
+                    char subnetMask[INET_ADDRSTRLEN];
+
+                    inet_ntop(AF_INET, &(reinterpret_cast<struct sockaddr_in*>(addr->addr))->sin_addr, subnetMask, INET_ADDRSTRLEN);
+                    inet_ntop(AF_INET, &(reinterpret_cast<struct sockaddr_in*>(addr->netmask))->sin_addr, subnetMask, INET_ADDRSTRLEN);
+
+                    // Ensure null-termination of the ipAddress string
+                    ipAddress[INET_ADDRSTRLEN - 1] = '\0';
+
+                    //compare the ip address with the identifier
+                    if (IsIpAddressInNetwork(ipAddress, networkId, subnetMask))
+                    {
+                        return true;
+                    }
                 }
-            }
-            else if (addr->addr->sa_family == AF_INET6)
-            {
-                // convert ip address and subnet mask to string representations
-                char ipAddress[INET6_ADDRSTRLEN];
-                char subnetMask[INET6_ADDRSTRLEN];
-
-                inet_ntop(AF_INET6, &(reinterpret_cast<struct sockaddr_in6*>(addr->addr))->sin6_addr, ipAddress, INET6_ADDRSTRLEN);
-                inet_ntop(AF_INET6, &(reinterpret_cast<struct sockaddr_in6*>(addr->netmask))->sin6_addr, subnetMask, INET6_ADDRSTRLEN);
-
-                // Ensure null-termination of the ipAddress string
-                ipAddress[INET_ADDRSTRLEN - 1] = '\0';
-
-                //compare the ip address with the network id
-                if (IsIpAddressInNetwork(ipAddress, networkId, subnetMask))
+                else if (addr->addr->sa_family == AF_INET6)
                 {
-                    return true;
+                    // convert ip address and subnet mask to string representations
+                    char ipAddress[INET6_ADDRSTRLEN];
+                    char subnetMask[INET6_ADDRSTRLEN];
+
+                    inet_ntop(AF_INET6, &(reinterpret_cast<struct sockaddr_in6*>(addr->addr))->sin6_addr, ipAddress, INET6_ADDRSTRLEN);
+                    inet_ntop(AF_INET6, &(reinterpret_cast<struct sockaddr_in6*>(addr->netmask))->sin6_addr, subnetMask, INET6_ADDRSTRLEN);
+
+                    // Ensure null-termination of the ipAddress string
+                    ipAddress[INET_ADDRSTRLEN - 1] = '\0';
+
+                    //compare the ip address with the network id
+                    if (IsIpAddressInNetwork(ipAddress, networkId, subnetMask))
+                    {
+                        return true;
+                    }
+
                 }
 
             }
-
         }
+        else
+        {
+            std::cerr << "No network interfaces found in this network\n";
+        }        
 
         return false;
     }
@@ -184,7 +191,7 @@ namespace DataCollection
         int i = 0;
 
         // iterate through the list of network interfaces
-        for (dev = allDevs; dev != NULL; dev->next)
+        for (dev = allDevs; dev != NULL; dev = dev->next)
         {
             // check if the network identifier matchhes the interfaces IP address or subnet
             bool isInNetwork = IsInterfaceInNetwork(dev, networkId);
@@ -212,6 +219,37 @@ namespace DataCollection
 
         return networkInterfaces;
     }
+
+    // create log file to store network logs and data    
+    NetworkLogger::NetworkLogger(const std::string& logFileName)
+    {
+        logFile.open(logFileName, std::ios::app); // open log file in append mode
+        if (!logFile.is_open())
+        {
+            throw std::runtime_error("Failed to open log file.");
+        }
+    }
+
+    NetworkLogger::~NetworkLogger()
+    {
+        if (logFile.is_open())
+        {
+            logFile.close();
+        }
+    }
+
+    void NetworkLogger::Log(const std::string logMessage)
+    {
+        if (logFile.is_open())
+        {
+            logFile << logMessage << std::endl;
+        }
+        else
+        {
+            std::cerr << "Error: Log file is not open" << std::endl;
+        }
+    }
+
 
 
     // network logs

@@ -156,6 +156,19 @@ namespace DataCollection
         std::string NetworkScan(const std::string& target, const std::string& options);
     };
 
+    class NetworkLogger 
+    {
+    private:
+        std::ofstream logFile;
+
+    public:
+        NetworkLogger(const std::string& logFileName);
+
+        ~NetworkLogger();
+
+        void Log(const std::string logMessage);
+    };
+
     // collecting network logs
     class LogCollector
     {
