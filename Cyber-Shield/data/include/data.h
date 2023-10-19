@@ -9,7 +9,8 @@
 #include <map>
 #include <stdio.h>
 #include <cstdint>
-
+#include <condition_variable>
+#include <atomic>
 
 #include <pcap.h>
 
@@ -136,29 +137,8 @@ namespace DataCollection
         WirelessProperties wirelessProperties;
     };
 
-    // collecting network supplementary data
-    class NetworkHelperFunctions
-    {
-    private:
-        const std::string& ipAddress;
-        const std::string& networkId;
-        const std::string& subnetMask;
-        pcap_if_t* dev;
-        const std::string& target;
-        const std::string& options;
-    public:
-        NetworkHelperFunctions(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask, pcap_if_t* dev, const std::string& target, const std::string& options);
-
-        bool IsIpAddressInNetwork(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask);
-
-        bool IsInterfaceInNetwork(pcap_if_t* dev, const std::string& networkId);
-
-        std::vector<NetworkInterface> GetNetworkInterfaces(const std::string& networkId);
-
-        std::string NetworkScan(const std::string& target, const std::string& options);
-    };
-
-    class NetworkLogger 
+    // logic to create a log file for the network
+    class NetworkLogger
     {
     private:
         std::ofstream logFile;
@@ -171,24 +151,24 @@ namespace DataCollection
         void Log(const std::string logMessage);
     };
 
-    // collecting network logs
-    class LogCollector
+    // collecting network extra data
+    class NetworkHelperFunctions
     {
     private:
-        std::string logFilePath;
-
+        const std::string& ipAddress;
+        const std::string& networkId;
+        const std::string& subnetMask;
+        pcap_if_t* dev;
+        const std::string& target;
+        const std::string& options;
+        NetworkLogger& logger;
     public:
-        LogCollector(const std::string& logFilePath);
-        std::string CollectData();
-    };
+        NetworkHelperFunctions(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask, pcap_if_t* dev, const std::string& target, const std::string& options, NetworkLogger& logger);
 
-    // collecting network metadata
-    class MetadataCollector
-    {
-    public:
-        MetadataCollector();
-        std::string CollectData();
-    };
+        bool IsIpAddressInNetwork(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask);
+        std::vector<NetworkInterface> GetNetworkInterfaces(const std::string& networkId);
+        std::string NetworkScan(const std::string& target, const std::string& options);
+    };   
 
 
     // collecting network packets
@@ -198,15 +178,22 @@ namespace DataCollection
         const std::vector<NetworkInterface>& networkInterfaces;
         int packetCount;
         pcap_t* pcapHandle = nullptr;
-        bool isCapturing;
         std::map<std::string, std::vector<NetworkPacket>> capturedPackets;
         std::vector<std::thread> threads;
         std::mutex capturedPacketsMutex;
+        std::mutex startMutex;
+        std::condition_variable startCV;
+        int startBarrier; // Barrier to synchronise thread start
+        std::atomic<bool> isCapturing;
+        // capture packets
+        std::vector<NetworkPacket> capturedPacketsArr;
 
-        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header);
+        NetworkLogger& logger;
+
+        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, NetworkInterface& iface);
 
     public:
-        PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, int packetCount);
+        PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, int packetCount, NetworkLogger& logger);
         ~PacketCollector();
 
         void StartCapture();
@@ -221,10 +208,32 @@ namespace DataCollection
     {
     private:
         std::string ipAddress;
+        NetworkLogger& logger;
 
     public:
-        EndpointDataCollector(const std::string& ipAdrress);
+        EndpointDataCollector(const std::string& ipAdrress, NetworkLogger& logger);
         EndpointData CollectData();
+    };
+
+    // collecting network metadata
+    class MetadataCollector
+    {
+    private:
+        NetworkLogger& logger;
+    public:
+        MetadataCollector(NetworkLogger& logger);
+        std::string CollectData();
+    };
+
+    // collecting network logs
+    class LogCollector
+    {
+    private:
+        std::string logFilePath;
+
+    public:
+        LogCollector(const std::string& logFilePath);
+        std::string CollectData();
     };
 }
 

@@ -4,8 +4,39 @@
 
 namespace DataCollection
 {
-    NetworkHelperFunctions::NetworkHelperFunctions(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask, pcap_if_t* dev, const std::string& target, const std::string& options)
-        : ipAddress(ipAddress), networkId(networkId), subnetMask(subnetMask), dev(dev), target(target), options(options) {}
+    // create log file to store network logs and data    
+    NetworkLogger::NetworkLogger(const std::string& logFileName)
+    {
+        logFile.open(logFileName, std::ios::app); // open log file in append mode
+        if (!logFile.is_open())
+        {
+            throw std::runtime_error("Failed to open log file.");
+        }
+    }
+
+    NetworkLogger::~NetworkLogger()
+    {
+        if (logFile.is_open())
+        {
+            logFile.close();
+        }
+    }
+
+    void NetworkLogger::Log(const std::string logMessage)
+    {
+        if (logFile.is_open())
+        {
+            logFile << logMessage << std::endl;
+        }
+        else
+        {
+            std::cerr << "Error: Log file is not open" << std::endl;
+        }
+    }
+
+    // Network helper functions initializations
+    NetworkHelperFunctions::NetworkHelperFunctions(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask, pcap_if_t* dev, const std::string& target, const std::string& options, NetworkLogger& logger)
+        : ipAddress(ipAddress), networkId(networkId), subnetMask(subnetMask), dev(dev), target(target), options(options), logger(logger) {}
 
     // define a function for performing network scanning using nmap
     std::string NetworkHelperFunctions::NetworkScan(const std::string& target, const std::string& options)
@@ -32,6 +63,7 @@ namespace DataCollection
                 // Handle the case where _dupenv_s fails to retrieve the PATH variable
                 //You can provide a default PATH value or handle the error accordingly
                 std::cerr << "Failed to retrieve the PATH variable." << std::endl;
+                logger.Log("Failed to retrieve the PATH variable.");
             }
 
             // build the nmap command
@@ -61,10 +93,12 @@ namespace DataCollection
         catch (const std::exception& e)
         {
             std::cerr << "Error: " << e.what() << std::endl;
+            logger.Log("Error: Network scan failed");
             return "Error: Network scan failed";
         }
     }
 
+    // find out if an ip address is in the network
     bool NetworkHelperFunctions::IsIpAddressInNetwork(const std::string& ipAddress, const std::string& networkIdentifier, const std::string& subnetMask)
     {
         if (ipAddress.find(':') != std::string::npos)
@@ -116,63 +150,7 @@ namespace DataCollection
         return false;
     }
 
-
-    bool NetworkHelperFunctions::IsInterfaceInNetwork(pcap_if_t* dev, const std::string& networkId)
-    {
-        if (dev != nullptr)
-        {
-            // get ip address and subnet mask from the interface
-            for (pcap_addr* addr = dev->addresses; addr != nullptr; addr = addr->next)
-            {
-                if (addr->addr->sa_family == AF_INET) //IPv4 address
-                {
-                    // convert the IP address and subnet mask to string representation
-                    char ipAddress[INET_ADDRSTRLEN];
-                    char subnetMask[INET_ADDRSTRLEN];
-
-                    inet_ntop(AF_INET, &(reinterpret_cast<struct sockaddr_in*>(addr->addr))->sin_addr, subnetMask, INET_ADDRSTRLEN);
-                    inet_ntop(AF_INET, &(reinterpret_cast<struct sockaddr_in*>(addr->netmask))->sin_addr, subnetMask, INET_ADDRSTRLEN);
-
-                    // Ensure null-termination of the ipAddress string
-                    ipAddress[INET_ADDRSTRLEN - 1] = '\0';
-
-                    //compare the ip address with the identifier
-                    if (IsIpAddressInNetwork(ipAddress, networkId, subnetMask))
-                    {
-                        return true;
-                    }
-                }
-                else if (addr->addr->sa_family == AF_INET6)
-                {
-                    // convert ip address and subnet mask to string representations
-                    char ipAddress[INET6_ADDRSTRLEN];
-                    char subnetMask[INET6_ADDRSTRLEN];
-
-                    inet_ntop(AF_INET6, &(reinterpret_cast<struct sockaddr_in6*>(addr->addr))->sin6_addr, ipAddress, INET6_ADDRSTRLEN);
-                    inet_ntop(AF_INET6, &(reinterpret_cast<struct sockaddr_in6*>(addr->netmask))->sin6_addr, subnetMask, INET6_ADDRSTRLEN);
-
-                    // Ensure null-termination of the ipAddress string
-                    ipAddress[INET_ADDRSTRLEN - 1] = '\0';
-
-                    //compare the ip address with the network id
-                    if (IsIpAddressInNetwork(ipAddress, networkId, subnetMask))
-                    {
-                        return true;
-                    }
-
-                }
-
-            }
-        }
-        else
-        {
-            std::cerr << "No network interfaces found in this network\n";
-        }        
-
-        return false;
-    }
-
-
+    // retrieve a device's network interfaces
     std::vector<NetworkInterface> NetworkHelperFunctions::GetNetworkInterfaces(const std::string& networkId)
     {
         std::vector<NetworkInterface> networkInterfaces;
@@ -183,6 +161,7 @@ namespace DataCollection
         //retrieve the list of network interfaces
         if (pcap_findalldevs(&allDevs, errbuf) == -1)
         {
+            logger.Log(errbuf);
             std::cerr << "Failed to retrieve network interfaces" << errbuf << std::endl;
             return networkInterfaces;
         }
@@ -193,25 +172,10 @@ namespace DataCollection
         // iterate through the list of network interfaces
         for (dev = allDevs; dev != NULL; dev = dev->next)
         {
-            // check if the network identifier matchhes the interfaces IP address or subnet
-            bool isInNetwork = IsInterfaceInNetwork(dev, networkId);
-
-            if (isInNetwork)
-            {
-                NetworkInterface networkInterface;
-                networkInterface.interfaceName = dev->name;
-
-                if (dev->description)
-                {
-                    networkInterface.interfaceDescription = dev->description;
-                }
-                else
-                {
-                    networkInterface.interfaceDescription = "N/A";
-                }
-
-                networkInterfaces.push_back(networkInterface);
-            }
+            NetworkInterface networkInterface;
+            networkInterface.interfaceName = dev->name;
+            networkInterface.interfaceDescription = dev->description ? dev->description : "N/A";
+            networkInterfaces.push_back(networkInterface);
         }
 
         // free the list of network interfaces
@@ -220,80 +184,8 @@ namespace DataCollection
         return networkInterfaces;
     }
 
-    // create log file to store network logs and data    
-    NetworkLogger::NetworkLogger(const std::string& logFileName)
-    {
-        logFile.open(logFileName, std::ios::app); // open log file in append mode
-        if (!logFile.is_open())
-        {
-            throw std::runtime_error("Failed to open log file.");
-        }
-    }
-
-    NetworkLogger::~NetworkLogger()
-    {
-        if (logFile.is_open())
-        {
-            logFile.close();
-        }
-    }
-
-    void NetworkLogger::Log(const std::string logMessage)
-    {
-        if (logFile.is_open())
-        {
-            logFile << logMessage << std::endl;
-        }
-        else
-        {
-            std::cerr << "Error: Log file is not open" << std::endl;
-        }
-    }
-
-
-
-    // network logs
-    LogCollector::LogCollector(const std::string& logFilePath) : logFilePath(logFilePath) {}
-
-    std::string LogCollector::CollectData()
-    {
-        std::string data;
-
-        try
-        {
-            // Open the log file for reading
-            std::fstream logFile(logFilePath);
-
-            if (!logFile.is_open())
-            {
-                std::cerr << "Error: Failed to open log file: " << logFilePath << std::endl;
-                std::cout << "Error: Failed to open log file: " << logFilePath << std::endl;
-                return ""; // Return an empty string if the file cannot be opened
-            }
-
-            // Read the contents of the log file into a string
-            data.assign((std::istreambuf_iterator<char>(logFile)), std::istreambuf_iterator<char>());
-
-            // Close the file
-            logFile.close();
-
-            // Clear the log file contents
-            std::ofstream clearLogFile(logFilePath);
-            clearLogFile.close();
-        }
-        catch (const std::exception& e)
-        {
-            std::cerr << "Error: Exception occurred during log collection: " << e.what() << std::endl;
-            std::cout << "Error: Exception occurred during log collection: " << e.what() << std::endl;
-            return "";
-        }
-
-        return data;
-    }
-
-
     // collecting information about network adapters
-    MetadataCollector::MetadataCollector() {}
+    MetadataCollector::MetadataCollector(NetworkLogger& logger) : logger(logger) {}
 
     std::string MetadataCollector::CollectData() {
         try
@@ -307,6 +199,7 @@ namespace DataCollection
 
             if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, nullptr, &allDevs, errbuf) == -1)
             {
+                logger.Log("Error: Failed to find network adapters " + std::string(errbuf));
                 std::cerr << "Error: Failed to find network adapters" << errbuf << std::endl;
                 return "Error: Network data collection failed";
             }
@@ -335,14 +228,15 @@ namespace DataCollection
         catch (const std::exception& e)
         {
             // handle necessary exception
+            logger.Log("Error: Error during metadata collection: " + std::string(e.what()));
             std::cerr << "Error: Error during metadata collection: " << e.what() << std::endl;
             return "Error: Metadata collection failed";
         }
     }
 
-
-    PacketCollector::PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, int packetCount)
-        : networkInterfaces(networkInterfaces), packetCount(packetCount) {}
+    // packet capture init
+    PacketCollector::PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, int packetCount, NetworkLogger& logger)
+        : networkInterfaces(networkInterfaces), packetCount(packetCount), logger(logger) {}
 
     PacketCollector::~PacketCollector()
     {
@@ -360,23 +254,26 @@ namespace DataCollection
         {
             std::cerr << "Already capturing" << std::endl;
             return;
-        }        
+        }
+
+        // Initialize the barrier to ensure all threads start capturing together
+        std::unique_lock<std::mutex> startLock(startMutex);
+        startBarrier = networkInterfaces.size();
+        startCV.notify_all();
 
         // start a capture thread for each network interface
         for (auto& iface : networkInterfaces)
         {
             threads.emplace_back(&PacketCollector::CapturePackets, this, std::ref(iface));
-
-            isCapturing = true;
-
-            // wait for all threads to finish
-            for (auto& thread : threads)
-            {
-                thread.join();
-            }
                 
         }
+
+        // wait for all threads to be ready to capture
+        startCV.wait(startLock, [this] {return startBarrier == 0; });
+
+        isCapturing = true;
         
+        //release the lock, allowing threads to capture packets
     }
 
     //stop packet capture
@@ -415,162 +312,170 @@ namespace DataCollection
 
         if (iface.pcapHandle == nullptr)
         {
+            logger.Log("Error: Failed to open network interface: " + std::string(iface.interfaceName) + std::string(errbuf));
             std::cerr << "Error: Failed to open network interface (" << iface.interfaceName << "): " << errbuf << std::endl;
             return;
-        }
+        }        
 
-        // capture packets
-        std::vector<NetworkPacket> capturedPacketsArr;
-
+        // capture the packets while isCapturing is true
         while (isCapturing)
         {
             struct pcap_pkthdr header;
             const u_char* packetData = pcap_next(iface.pcapHandle, &header);
+
             if (packetData != nullptr)
             {
-                NetworkPacket packet;
-                // Buffer to store the formatted timestamp
-                char timestampBuffer[26];
-
-                if (ctime_s(timestampBuffer, sizeof(timestampBuffer), (const time_t*)&header.ts.tv_sec) == 0)
-                {
-                    packet.timestamp = timestampBuffer;
-                }
-                else
-                {
-                    packet.timestamp = "Error formatting timestamp";
-                }
-
-                if (iface.interfaceDescription.find("Ethernet") != std::string::npos)
-                {
-                    // Assuming Ethernet frame size is at least 14 bytes (size of Ethernet header)
-                    if (header.caplen >= 14)
-                    {
-                        const u_char* ethHeader = packetData;
-                        const u_char* ipHeader = packetData + 14; // Skip Ethernet header
-                        struct IpHeader* ip = (struct IpHeader*)ipHeader;
-
-                        // Extract IP header fields
-                        packet.ipHeader.version = (ip->version >> 4) & 0x0F;
-                        packet.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
-                        packet.ipHeader.tos = ip->tos;
-                        packet.ipHeader.totalLength = ntohs(ip->totalLength);
-                        packet.ipHeader.identification = ntohs(ip->identification);
-                        packet.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
-                        packet.ipHeader.ttl = ip->ttl;
-                        packet.ipHeader.protocol = ip->protocol;
-                        packet.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
-
-                        // Convert IP addresses to string representations
-                        char sourceIpString[INET_ADDRSTRLEN];
-                        char destinationIpString[INET_ADDRSTRLEN];
-
-                        inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
-                        inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
-
-                        packet.ipHeader.sourceIp = sourceIpString;
-                        packet.ipHeader.destinationIp = destinationIpString;
-
-                        // You may also extract other fields depending on your requirements
-
-                        // Assuming payload follows the IP header
-                        const u_char* payload = packetData + 14 + (ip->headerLength * 4); // Skip Ethernet + IP header
-
-                        // Copy payload data to the NetworkPacket
-                        packet.applicationData.assign(payload, payload + header.caplen - 14 - (ip->headerLength * 4));
-
-                        // Store the packet details in the shared vector
-                        std::lock_guard<std::mutex> lock(capturedPacketsMutex);
-                        capturedPacketsArr.push_back(packet);
-                    }
-                }
-                else if (iface.interfaceDescription.find("Wi-Fi") != std::string::npos)
-                {
-                    // Buffer to store the formatted timestamp
-                    char timestampBuffer[26];
-
-                    if (ctime_s(timestampBuffer, sizeof(timestampBuffer), (const time_t*)&header.ts.tv_sec) == 0)
-                    {
-                        packet.timestamp = timestampBuffer;
-                    }
-                    else
-                    {
-                        packet.timestamp = "Error formatting timestamp";
-                    }
-
-                    // Assuming Wi-Fi frame size is at least 24 bytes (size of Wi-Fi header)
-                    if (header.caplen >= 24)
-                    {
-                        const u_char* wifiHeader = packetData;
-
-                        // Extract the frame control field (2 bytes)
-                        uint16_t frameControl = wifiHeader[0] | (wifiHeader[1] << 8);
-
-                        // Check if it's an IP packet (assuming it's an IPv4 packet)
-                        if ((frameControl & 0x0F00) == 0x0800)
-                        {
-                            const u_char* ipHeader = packetData + 24; // Skip Wi-Fi header
-                            struct IpHeader* ip = (struct IpHeader*)ipHeader;
-
-                            // Extract IP header fields
-                            packet.ipHeader.version = (ip->version >> 4) & 0x0F;
-                            packet.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
-                            packet.ipHeader.tos = ip->tos;
-                            packet.ipHeader.totalLength = ntohs(ip->totalLength);
-                            packet.ipHeader.identification = ntohs(ip->identification);
-                            packet.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
-                            packet.ipHeader.ttl = ip->ttl;
-                            packet.ipHeader.protocol = ip->protocol;
-                            packet.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
-
-                            // Convert IP addresses to string representations
-                            char sourceIpString[INET_ADDRSTRLEN];
-                            char destinationIpString[INET_ADDRSTRLEN];
-
-                            inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
-                            inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
-
-                            packet.ipHeader.sourceIp = sourceIpString;
-                            packet.ipHeader.destinationIp = destinationIpString;
-
-                            // Assuming payload follows the IP header
-                            const u_char* payload = packetData + 20; // Skip Wi-Fi + IP header (assuming IP header is 20 bytes)
-
-                            // Calculate the payload length
-                            uint16_t payloadLength = header.caplen - 24 - 20; // Skip Wi-Fi header and IP header
-
-                            // Copy payload data to the NetworkPacket
-                            packet.applicationData.assign(payload, payload + payloadLength);
-
-                            // Store the packet details in the shared vector
-                            std::lock_guard<std::mutex> lock(capturedPacketsMutex);
-                            capturedPacketsArr.push_back(packet);
-                        }
-                    }
-                }
-                else
-                {
-                    std::cerr << "Interface not valid";
-                    continue;
-                }
-
+                ProcessPacket(packetData, header, iface);
             }
-            
         }
 
-        std::lock_guard<std::mutex> lock(capturedPacketsMutex);
-        capturedPackets[iface.interfaceName] = capturedPacketsArr;
+        // Lock and store the captured packets in the map
+        {
+            std::lock_guard<std::mutex> lock(capturedPacketsMutex);
+            capturedPackets[iface.interfaceName] = capturedPacketsArr;
+        }
 
         pcap_close(iface.pcapHandle);
     }
 
+    // process the packet collected
+    void PacketCollector::ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, NetworkInterface& iface)
+    {
+        NetworkPacket packet;
+        // Buffer to store the formatted timestamp
+        char timestampBuffer[26];
+
+        if (ctime_s(timestampBuffer, sizeof(timestampBuffer), (const time_t*)&header.ts.tv_sec) == 0)
+        {
+            packet.timestamp = timestampBuffer;
+        }
+        else
+        {
+            packet.timestamp = "Error formatting timestamp";
+        }
+
+        if (iface.interfaceDescription.find("Ethernet") != std::string::npos)
+        {
+            // Assuming Ethernet frame size is at least 14 bytes (size of Ethernet header)
+            if (header.caplen >= 14)
+            {
+                const u_char* ethHeader = packetData;
+                const u_char* ipHeader = packetData + 14; // Skip Ethernet header
+                struct IpHeader* ip = (struct IpHeader*)ipHeader;
+
+                // Extract IP header fields
+                packet.ipHeader.version = (ip->version >> 4) & 0x0F;
+                packet.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
+                packet.ipHeader.tos = ip->tos;
+                packet.ipHeader.totalLength = ntohs(ip->totalLength);
+                packet.ipHeader.identification = ntohs(ip->identification);
+                packet.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
+                packet.ipHeader.ttl = ip->ttl;
+                packet.ipHeader.protocol = ip->protocol;
+                packet.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
+
+                // Convert IP addresses to string representations
+                char sourceIpString[INET_ADDRSTRLEN];
+                char destinationIpString[INET_ADDRSTRLEN];
+
+                inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
+                inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
+
+                packet.ipHeader.sourceIp = sourceIpString;
+                packet.ipHeader.destinationIp = destinationIpString;
+
+                // You may also extract other fields depending on your requirements
+
+                // Assuming payload follows the IP header
+                const u_char* payload = packetData + 14 + (ip->headerLength * 4); // Skip Ethernet + IP header
+
+                // Copy payload data to the NetworkPacket
+                packet.applicationData.assign(payload, payload + header.caplen - 14 - (ip->headerLength * 4));
+                
+            }
+        }
+        else if (iface.interfaceDescription.find("Wi-Fi") != std::string::npos)
+        {
+            // Buffer to store the formatted timestamp
+            char timestampBuffer[26];
+
+            if (ctime_s(timestampBuffer, sizeof(timestampBuffer), (const time_t*)&header.ts.tv_sec) == 0)
+            {
+                packet.timestamp = timestampBuffer;
+            }
+            else
+            {
+                packet.timestamp = "Error formatting timestamp";
+            }
+
+            // Assuming Wi-Fi frame size is at least 24 bytes (size of Wi-Fi header)
+            if (header.caplen >= 24)
+            {
+                const u_char* wifiHeader = packetData;
+
+                // Extract the frame control field (2 bytes)
+                uint16_t frameControl = wifiHeader[0] | (wifiHeader[1] << 8);
+
+                // Check if it's an IP packet (assuming it's an IPv4 packet)
+                if ((frameControl & 0x0F00) == 0x0800)
+                {
+                    const u_char* ipHeader = packetData + 24; // Skip Wi-Fi header
+                    struct IpHeader* ip = (struct IpHeader*)ipHeader;
+
+                    // Extract IP header fields
+                    packet.ipHeader.version = (ip->version >> 4) & 0x0F;
+                    packet.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
+                    packet.ipHeader.tos = ip->tos;
+                    packet.ipHeader.totalLength = ntohs(ip->totalLength);
+                    packet.ipHeader.identification = ntohs(ip->identification);
+                    packet.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
+                    packet.ipHeader.ttl = ip->ttl;
+                    packet.ipHeader.protocol = ip->protocol;
+                    packet.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
+
+                    // Convert IP addresses to string representations
+                    char sourceIpString[INET_ADDRSTRLEN];
+                    char destinationIpString[INET_ADDRSTRLEN];
+
+                    inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
+                    inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
+
+                    packet.ipHeader.sourceIp = sourceIpString;
+                    packet.ipHeader.destinationIp = destinationIpString;
+
+                    // Assuming payload follows the IP header
+                    const u_char* payload = packetData + 20; // Skip Wi-Fi + IP header (assuming IP header is 20 bytes)
+
+                    // Calculate the payload length
+                    uint16_t payloadLength = header.caplen - 24 - 20; // Skip Wi-Fi header and IP header
+
+                    // Copy payload data to the NetworkPacket
+                    packet.applicationData.assign(payload, payload + payloadLength);
+                    
+                }
+            }
+        }
+        else
+        {
+            logger.Log("Interface not valid");
+            std::cerr << "Interface not valid";
+        }
+
+        // Store the packet details in the shared vector
+        std::lock_guard<std::mutex> lock(capturedPacketsMutex);
+        capturedPacketsArr.push_back(packet);
+
+    }
+
+    // returning collected packets
     std::map<std::string, std::vector<NetworkPacket>> PacketCollector::GetCapturedPackets()
     {
         std::lock_guard<std::mutex> lock(capturedPacketsMutex);
         return capturedPackets;
     }
 
-    EndpointDataCollector::EndpointDataCollector(const std::string& ipAddress) : ipAddress(ipAddress) {}
+    // endpoint data collection init
+    EndpointDataCollector::EndpointDataCollector(const std::string& ipAddress, NetworkLogger& logger) : ipAddress(ipAddress), logger(logger) {}
 
     // Function to collect endpoint data
     EndpointData EndpointDataCollector::CollectData()
@@ -696,10 +601,49 @@ namespace DataCollection
         catch (const std::exception& e)
         {
             // Handle any exceptions or errors that occur during data collection
+            logger.Log(e.what());
             std::cerr << "Error: " << e.what() << std::endl;
             // Return an empty or error state EndpointData if needed
             return endpointData;  // You may define an error state in the struct
         }
+    }
+
+    // network logs
+    LogCollector::LogCollector(const std::string& logFilePath) : logFilePath(logFilePath) {}
+
+    std::string LogCollector::CollectData()
+    {
+        std::string data;
+
+        try
+        {
+            // Open the log file for reading
+            std::fstream logFile(logFilePath);
+
+            if (!logFile.is_open())
+            {
+                std::cerr << "Error: Failed to open log file: " << logFilePath << std::endl;
+                std::cout << "Error: Failed to open log file: " << logFilePath << std::endl;
+                return ""; // Return an empty string if the file cannot be opened
+            }
+
+            // Read the contents of the log file into a string
+            data.assign((std::istreambuf_iterator<char>(logFile)), std::istreambuf_iterator<char>());
+
+            // Close the file
+            logFile.close();
+
+            // Clear the log file contents
+            std::ofstream clearLogFile(logFilePath);
+            clearLogFile.close();
+        }
+        catch (const std::exception& e)
+        {
+            std::cout << "Error: Exception occurred during log collection: " << e.what() << std::endl;
+            return "";
+        }
+
+        return data;
     }
 
 }
