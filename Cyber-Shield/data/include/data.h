@@ -28,7 +28,7 @@ namespace DataCollection
     };
 
     // Define the structure for the IP header
-    struct IpHeader
+    struct Ipv4Header
     {
         uint8_t version;               // IP version (e.g., 4 for IPv4, 6 for IPv6)
         uint8_t headerLength;          // Header length in 32-bit words
@@ -43,12 +43,23 @@ namespace DataCollection
         std::string destinationIp;     // Destination IP address (string representation)
     };
 
+    struct IPv6Header {
+        uint8_t version;
+        uint8_t trafficClass;
+        uint32_t flowLabel;
+        uint16_t payloadLength;
+        uint8_t nextHeader;
+        uint8_t hopLimit;
+        struct in6_addr sourceIp;
+        struct in6_addr destinationIp;
+    };
+
     // Define the structure for a network packet
     struct NetworkPacket
     {
         std::string networkInterface;      // Interface from which the packet is captured
         EthernetHeader ethernetHeader;    // Ethernet header
-        IpHeader ipHeader;                // IP header
+        Ipv4Header ipHeader;                // IP header
         uint16_t sourcePort;              // Source port (e.g., for TCP or UDP)
         uint16_t destinationPort;         // Destination port (e.g., for TCP or UDP)
         uint32_t sequenceNumber;          // Sequence number (e.g., for TCP)
