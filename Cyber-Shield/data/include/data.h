@@ -168,7 +168,7 @@ namespace DataCollection
         bool IsIpAddressInNetwork(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask);
         std::vector<NetworkInterface> GetNetworkInterfaces(const std::string& networkId);
         std::string NetworkScan(const std::string& target, const std::string& options);
-    };   
+    };
 
 
     // collecting network packets
@@ -182,15 +182,16 @@ namespace DataCollection
         std::vector<std::thread> threads;
         std::mutex capturedPacketsMutex;
         std::mutex startMutex;
+        std::mutex isCapturingMutex;
         std::condition_variable startCV;
-        int startBarrier; // Barrier to synchronise thread start
+        std::atomic<int> startBarrier = 0; // Barrier to synchronise thread start
         std::atomic<bool> isCapturing;
         // capture packets
         std::vector<NetworkPacket> capturedPacketsArr;
 
         NetworkLogger& logger;
 
-        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, NetworkInterface& iface);
+        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
 
     public:
         PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, int packetCount, NetworkLogger& logger);
@@ -198,11 +199,11 @@ namespace DataCollection
 
         void StartCapture();
         void StopCapture();
-        void CapturePackets(NetworkInterface& iface);
+        void CapturePackets(const NetworkInterface& iface);
         std::map<std::string, std::vector<NetworkPacket>> GetCapturedPackets();
     };
 
-    
+
     // collecting network endpoint data
     class EndpointDataCollector
     {
