@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <condition_variable>
 #include <atomic>
+#include <csignal>
 
 #include <pcap.h>
 
@@ -186,17 +187,28 @@ namespace DataCollection
     class PacketCollector
     {
     private:
+        // Constants for header sizes
+        const int EthernetHeaderSize = 14;
+        const int WiFiHeaderSize = 24;
+        const int IPv4HeaderSize = 20;
+        const int IPv6HeaderSize = 40;
+
         const std::vector<NetworkInterface>& networkInterfaces;
-        int packetCount;
         pcap_t* pcapHandle = nullptr;
         std::map<std::string, std::vector<NetworkPacket>> capturedPackets;
         std::vector<std::thread> threads;
+
         std::mutex capturedPacketsMutex;
+        std::mutex instanceMutex;
         std::mutex startMutex;
         std::mutex isCapturingMutex;
-        std::condition_variable startCV;
+        std::condition_variable startCV;  //global condition variable for synchronization
+
         std::atomic<int> startBarrier = 0; // Barrier to synchronise thread start
-        std::atomic<bool> isCapturing;
+        std::atomic<bool> stopCaptureFlag{false}; // global flag to stop packet capturre        
+
+        static PacketCollector* instance; //static pointer to an instance
+
         // capture packets
         std::vector<NetworkPacket> capturedPacketsArr;
 
@@ -205,12 +217,18 @@ namespace DataCollection
         void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
 
     public:
-        PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, int packetCount, NetworkLogger& logger);
+        PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, NetworkLogger& logger);
         ~PacketCollector();
 
         void StartCapture();
         void StopCapture();
         void CapturePackets(const NetworkInterface& iface);
+        bool IsIpv4Packet(const u_char* packetData);
+        bool IsIpv6Packet(const u_char* packetData);
+        void ProcessIpv4Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
+        void ProcessIpv6Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
+        static void StaticSignalHandler(int signal); // static function to serve as an inermediary to call the non-static SignalHandler functio
+        void SignalHandler(int signal);
         std::map<std::string, std::vector<NetworkPacket>> GetCapturedPackets();
     };
 
