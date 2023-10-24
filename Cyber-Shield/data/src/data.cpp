@@ -150,7 +150,7 @@ namespace DataCollection
     }
 
     // retrieve a device's network interfaces
-    std::vector<NetworkInterface> NetworkHelperFunctions::GetNetworkInterfaces(const std::string& networkId)
+    std::vector<NetworkInterface> NetworkHelperFunctions::GetNetworkInterfaces()
     {
         std::vector<NetworkInterface> networkInterfaces;
 
@@ -239,7 +239,7 @@ namespace DataCollection
     PacketCollector* PacketCollector::instance = nullptr;
 
     PacketCollector::PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, NetworkLogger& logger)
-        : networkInterfaces(networkInterfaces), logger(logger), stopCaptureFlag(false) {
+        : networkInterfaces(networkInterfaces), logger(logger) {
         std::lock_guard<std::mutex> lock(instanceMutex);
         instance = this;
     }
@@ -247,7 +247,7 @@ namespace DataCollection
     // destructor
     PacketCollector::~PacketCollector()
     {
-        if (stopCaptureFlag)
+        if (isCapturing)
         {
             StopCapture();
         }
@@ -257,34 +257,48 @@ namespace DataCollection
         }
     }
 
-    // check if packet is ipv4
-    bool PacketCollector::IsIpv4Packet(const u_char* packetData)
+    // Check if packet is IPv4
+    bool PacketCollector::IsIpv4Packet(const u_char* packetData, int linkType) 
     {
-        // Assuming Ethernet frame or Wi-Fi frame
-        if ((packetData[EthernetHeaderSize - 2] == 0x08 && packetData[EthernetHeaderSize - 1] == 0x00) ||  // EtherType for IPv4
-            (packetData[EthernetHeaderSize - 2] == 0x08 && packetData[EthernetHeaderSize - 1] == 0x06) ||  // EtherType for Wi-Fi (WEP)
-            (packetData[EthernetHeaderSize - 2] == 0x08 && packetData[EthernetHeaderSize - 1] == 0x08) ||  // EtherType for Wi-Fi (WPA)
-            (packetData[0] == 0x88 && packetData[1] == 0x8E)) {    // Type for Wi-Fi (802.1X)
-            // It's an IPv4 packet
-            return true;
+        if (linkType == EthernetFrame) 
+        {
+            // Ethernet frame
+            const uint16_t ethType = (packetData[12] << 8) | packetData[13];
+            return ethType == 0x0800;  // IPv4 Ethernet frame
+
+        }
+        else if (linkType == WifiFrame) 
+        {   // Wi-Fi frame (Assuming Wi-Fi data frames)
+            // parse the data frame to check if it's IPv4
+            // check the EtherType inside the data frame.
+            const uint16_t etherType = (packetData[30] << 8) | packetData[31]; // Assuming Ethernet II frame
+            return etherType == 0x0800;  // IPv4 EtherType
+
         }
         return false;
     }
 
-    // check if packet is ipv4
-    bool PacketCollector::IsIpv6Packet(const u_char* packetData)
+    // Check if packet is IPv6
+    bool PacketCollector::IsIpv6Packet(const u_char* packetData, int linkType) 
     {
-        // Assuming Ethernet frame or Wi-Fi frame
-        if ((packetData[EthernetHeaderSize - 2] == 0x86 && packetData[EthernetHeaderSize - 1] == 0xDD) ||   // EtherType for IPv6
-            (packetData[EthernetHeaderSize - 2] == 0x08 && packetData[EthernetHeaderSize - 1] == 0x06) ||  // EtherType for Wi-Fi (WEP)
-            (packetData[EthernetHeaderSize - 2] == 0x08 && packetData[EthernetHeaderSize - 1] == 0x08) ||  // EtherType for Wi-Fi (WPA)
-            (packetData[0] == 0x88 && packetData[1] == 0x8E)) {    // Type for Wi-Fi (802.1X)
-            // It's an IPv6 packet
-            return true;
+        if (linkType == EthernetFrame)
+        {
+            // Ethernet frame
+            const uint16_t ethType = (packetData[12] << 8) | packetData[13];
+            return ethType == 0x86DD;  // IPv6 Ethernet frame
+
+        }
+        else if (linkType == WifiFrame)
+        {   // Wi-Fi frame (Assuming Wi-Fi data frames)
+            // parse the data frame to check if it's IPv6
+            // check the EtherType inside the data frame.
+            const uint16_t etherType = (packetData[30] << 8) | packetData[31]; // Assuming Ethernet II frame
+            return etherType == 0x86DD; // Wi-Fi data frame for IPv6
+
         }
         return false;
-    
     }
+
 
     void PacketCollector::ProcessIpv4Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface)
     {
@@ -324,7 +338,7 @@ namespace DataCollection
             int linkType = pcap_datalink(handle);
 
             // Check the interface name for common Ethernet prefixes
-            if (linkType == DLT_EN10MB || strstr(iface.interfaceName.c_str(), "eth") || strstr(iface.interfaceName.c_str(), "en"))
+            if (linkType == EthernetFrame || strstr(iface.interfaceDescription.c_str(), "Ethernet") || strstr(iface.interfaceName.c_str(), "vEthernet"))
             {
                 // It's likely an Ethernet interface
                 std::string interfaceId = iface.interfaceName;                
@@ -368,7 +382,7 @@ namespace DataCollection
                 pcap_close(handle);
                 
             }
-            else if (linkType == DLT_IEEE802_11_RADIO || strstr(iface.interfaceName.c_str(), "wlan") || strstr(iface.interfaceName.c_str(), "wifi"))
+            else if (linkType == WifiFrame || strstr(iface.interfaceDescription.c_str(), "Wi-Fi") || strstr(iface.interfaceName.c_str(), "Wifi"))
             {
                 // It's likely a Wi-Fi interface                
                 const u_char* wifiHeader = packetData;
@@ -475,7 +489,7 @@ namespace DataCollection
             int linkType = pcap_datalink(handle);
 
             // Check the interface name for common Ethernet prefixes
-            if (linkType == DLT_EN10MB || strstr(iface.interfaceName.c_str(), "eth") || strstr(iface.interfaceName.c_str(), "en"))
+            if (linkType == EthernetFrame || strstr(iface.interfaceDescription.c_str(), "Ethernet") || strstr(iface.interfaceName.c_str(), "vEthernet"))
             {
                 // It's likely an Ethernet interface
                 const u_char* ipv6Header = packetData + EthernetHeaderSize; // Skip Ethernet header
@@ -504,7 +518,7 @@ namespace DataCollection
                 packet.applicationData.assign(payload, payload + payloadLength);
 
             }
-            else if (linkType == DLT_IEEE802_11_RADIO || strstr(iface.interfaceName.c_str(), "wlan") || strstr(iface.interfaceName.c_str(), "wifi"))
+            else if (linkType == WifiFrame || strstr(iface.interfaceDescription.c_str(), "Wi-Fi") || strstr(iface.interfaceName.c_str(), "Wifi"))
             {
 
                 // It's likely a Wi-Fi interface                
@@ -561,16 +575,8 @@ namespace DataCollection
     void PacketCollector::SignalHandler(int signal)
     {
         // Handle interrupt signal (Ctrl + C) to stop packet capture
-        if (signal == SIGINT)
-        {
-            std::cout << "Stopping Packet  Capture...";
-            PacketCollector::~PacketCollector();
-        }
-        else
-        {
-            std::cerr << "An error occurred while trying to stop execution";
-        }
-        
+        std::cout << "Cleaning up and exiting..." << std::endl;
+        g_programShouldExit = 1;        
     }
 
     // call the non-static SignalHandler through an instance
@@ -582,17 +588,19 @@ namespace DataCollection
     // Start packet capture method
     void PacketCollector::StartCapture()
     {
+        // Ensure that only one thread can enter this method at a time
+        std::lock_guard<std::mutex> lock(instanceMutex);
+
         // register the signal handler function to handle the keyboard interrupt
-        signal(SIGINT, StaticSignalHandler);
+        std::signal(SIGINT, &StaticSignalHandler);
 
         // Check if packet capturing is in progress
-        if (stopCaptureFlag)
+        if (isCapturing.load(std::memory_order_relaxed))
         {
             logger.Log("Already capturing");
             std::cerr << "Already capturing" << std::endl;
             return;
         }
-
 
         // Initialize the barrier to ensure all threads start capturing together
         startBarrier.store(0, std::memory_order_relaxed);
@@ -605,12 +613,13 @@ namespace DataCollection
         }        
 
         // Wait for all threads to be ready to capture
-        while (startBarrier.load(std::memory_order_relaxed) < networkInterfaces.size())
-        {
-            std::this_thread::yield();
-        }
+        std::unique_lock<std::mutex> startLock(startMutex);
+        startCV.wait(startLock, [this] {
+            return startBarrier.load(std::memory_order_relaxed) == networkInterfaces.size();
+            });
 
-        stopCaptureFlag.store(true, std::memory_order_relaxed);
+        // Set a flag to indicate that capturing is in progress
+        isCapturing.store(true, std::memory_order_relaxed);
     }
 
     // packet capturing logic
@@ -631,8 +640,8 @@ namespace DataCollection
             startBarrier.fetch_sub(1, std::memory_order_relaxed); // Release the thread from the barrier
             return;
         }
-
-        while (stopCaptureFlag.load(std::memory_order_relaxed))
+       
+        while (isCapturing.load(std::memory_order_relaxed))
         {
             struct pcap_pkthdr header;
             const u_char* packetData = pcap_next(pcapHandle, &header);
@@ -657,33 +666,33 @@ namespace DataCollection
 
     // Process the packet collected
     void PacketCollector::ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface)
-    {        
-        if (IsIpv4Packet(packetData))
+    {
+        char errbuf[PCAP_ERRBUF_SIZE];
+        pcap_t* handle = pcap_open_live(iface.interfaceName.c_str(), BUFSIZ, 1, 1000, errbuf);
+
+        int linkType = pcap_datalink(handle);
+
+        if (IsIpv4Packet(packetData, linkType))
         {
             ProcessIpv4Packet(packetData, header, iface);
         }
-        else if (IsIpv6Packet(packetData))
+        else if (IsIpv6Packet(packetData, linkType))
         {
             ProcessIpv6Packet(packetData, header, iface);
         }
         else
         {
-            logger.Log("Unknown adapter protocol");
-            std::cerr << "Unknown adapter protocol";
+            //logger.Log("Unknown adapter protocol\n");
+            std::cerr << "Unknown adapter protocol\n";
         }
+        pcap_close(handle);
     }
 
     // Stop packet capture
     void PacketCollector::StopCapture()
     {
-        if (!stopCaptureFlag)
-        {
-            std::cerr << "Not currently capturing" << std::endl;
-            return;
-        }
-
         // Signal the capture threads to stop
-        stopCaptureFlag.store(true, std::memory_order_relaxed);
+        isCapturing.store(false, std::memory_order_relaxed);
 
         // Wait for all the threads to finish
         for (auto& thread : threads)
@@ -699,6 +708,8 @@ namespace DataCollection
                 pcap_close(iface.pcapHandle);
             }
         }
+
+        return;
     }
 
     // returning collected packets

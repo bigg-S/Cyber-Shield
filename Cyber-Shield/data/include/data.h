@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <csignal>
+#include <WinSock2.h>
 
 #include <pcap.h>
 
@@ -178,7 +179,7 @@ namespace DataCollection
         NetworkHelperFunctions(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask, pcap_if_t* dev, const std::string& target, const std::string& options, NetworkLogger& logger);
 
         bool IsIpAddressInNetwork(const std::string& ipAddress, const std::string& networkId, const std::string& subnetMask);
-        std::vector<NetworkInterface> GetNetworkInterfaces(const std::string& networkId);
+        std::vector<NetworkInterface> GetNetworkInterfaces();
         std::string NetworkScan(const std::string& target, const std::string& options);
     };
 
@@ -193,24 +194,33 @@ namespace DataCollection
         const int IPv4HeaderSize = 20;
         const int IPv6HeaderSize = 40;
 
-        const std::vector<NetworkInterface>& networkInterfaces;
-        pcap_t* pcapHandle = nullptr;
+        enum LinkType 
+        {
+            EthernetFrame = DLT_EN10MB,
+            WifiFrame = DLT_IEEE802_11
+        };
+
+        const std::vector<NetworkInterface>& networkInterfaces;        
         std::map<std::string, std::vector<NetworkPacket>> capturedPackets;
+        // store captured packets
+        std::vector<NetworkPacket> capturedPacketsArr;
+
         std::vector<std::thread> threads;
 
         std::mutex capturedPacketsMutex;
         std::mutex instanceMutex;
         std::mutex startMutex;
         std::mutex isCapturingMutex;
+
         std::condition_variable startCV;  //global condition variable for synchronization
 
         std::atomic<int> startBarrier = 0; // Barrier to synchronise thread start
-        std::atomic<bool> stopCaptureFlag{false}; // global flag to stop packet capturre        
+        std::atomic<bool> isCapturing{ false }; // global flag to stop packet capturre        
 
         static PacketCollector* instance; //static pointer to an instance
-
-        // capture packets
-        std::vector<NetworkPacket> capturedPacketsArr;
+        
+        // Global flag to determine whether the program should terminate
+        volatile sig_atomic_t g_programShouldExit = 0;
 
         NetworkLogger& logger;
 
@@ -223,8 +233,8 @@ namespace DataCollection
         void StartCapture();
         void StopCapture();
         void CapturePackets(const NetworkInterface& iface);
-        bool IsIpv4Packet(const u_char* packetData);
-        bool IsIpv6Packet(const u_char* packetData);
+        bool IsIpv4Packet(const u_char* packetData, int linkType);
+        bool IsIpv6Packet(const u_char* packetData, int linkType);
         void ProcessIpv4Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
         void ProcessIpv6Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
         static void StaticSignalHandler(int signal); // static function to serve as an inermediary to call the non-static SignalHandler functio
