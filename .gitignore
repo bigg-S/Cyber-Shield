@@ -9,3 +9,6 @@ Cyber-shield/main.cpp
 Cyber-shield/Cyber-Shield.vcxproj
 Cyber-shield/Cyber-Shield.vcxproj.filters
 Cyber-shield/Cyber-Shield.vcxproj.user
+.vs/ProjectSettings.json
+.vs/VSWorkspaceState.json
+.vs/slnx.sqlite
