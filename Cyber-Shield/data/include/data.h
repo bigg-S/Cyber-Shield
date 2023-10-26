@@ -7,7 +7,9 @@
 #include <thread>
 #include <array>
 #include <map>
+#include <unordered_set>
 #include <stdio.h>
+#include <stdint.h>
 #include <cstdint>
 #include <condition_variable>
 #include <atomic>
@@ -274,6 +276,61 @@ namespace DataCollection
     public:
         LogCollector(const std::string& logFilePath);
         std::string CollectData();
+    };
+
+    // test data container (storing our data)
+    class Data
+    {
+        std::vector<uint8_t>* featureVector;
+        uint8_t label;
+        int enumLabel; //
+
+    public:
+        Data();
+        ~Data();
+        void SetFeatureVector(std::vector<uint8_t>*);
+        void AppendToFeatureVector(uint8_t);
+        void SetLAbel(uint8_t);
+        void SetEnumLabel(int);
+
+        int GetFeatureVectorSize();
+        uint8_t GetLabel();
+        uint8_t GetEnumLabel();
+
+        std::vector<uint8_t>* GetFeatureVector();
+    };
+
+    // Data handler (implements logic to read in, spil, count unique classes, pass aroud all kinds of data)
+    class DataHandler
+    {
+        std::vector<Data*>* dataArray; // all the data
+        std::vector<Data*>* trainingData;
+        std::vector<Data*>* testData;
+        std::vector<Data*>* validationData;
+
+        int numClasses; // number of classes we have
+        int featureVectorSize;
+        std::map<uint8_t, int> classMap;
+
+        // in order to split data
+        const double TRAIN_SET_PERCENT = 0.75;
+        const double TEST_SET_PERCENT = 0.20;
+        const double VALIDATION_PERCENT = 0.05;
+
+    public:
+        DataHandler();
+        ~DataHandler();
+
+        void ReadFeatureVector(std::string path);
+        void ReadFeatureLabel(std::string path);
+        void SpliData();
+        void CountClasses();
+
+        uint32_t ConvertToLilEndian(const unsigned char* bytes);
+
+        std::vector<Data*>* GetTrainingData();
+        std::vector<Data*>* GetTestData();
+        std::vector<Data*>* GetValidationData();
     };
 }
 

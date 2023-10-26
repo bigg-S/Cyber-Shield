@@ -258,16 +258,16 @@ namespace DataCollection
     }
 
     // Check if packet is IPv4
-    bool PacketCollector::IsIpv4Packet(const u_char* packetData, int linkType) 
+    bool PacketCollector::IsIpv4Packet(const u_char* packetData, int linkType)
     {
-        if (linkType == EthernetFrame) 
+        if (linkType == EthernetFrame)
         {
             // Ethernet frame
             const uint16_t ethType = (packetData[12] << 8) | packetData[13];
             return ethType == 0x0800;  // IPv4 Ethernet frame
 
         }
-        else if (linkType == WifiFrame) 
+        else if (linkType == WifiFrame)
         {   // Wi-Fi frame (Assuming Wi-Fi data frames)
             // parse the data frame to check if it's IPv4
             // check the EtherType inside the data frame.
@@ -279,7 +279,7 @@ namespace DataCollection
     }
 
     // Check if packet is IPv6
-    bool PacketCollector::IsIpv6Packet(const u_char* packetData, int linkType) 
+    bool PacketCollector::IsIpv6Packet(const u_char* packetData, int linkType)
     {
         if (linkType == EthernetFrame)
         {
@@ -341,11 +341,11 @@ namespace DataCollection
             if (linkType == EthernetFrame || strstr(iface.interfaceDescription.c_str(), "Ethernet") || strstr(iface.interfaceName.c_str(), "vEthernet"))
             {
                 // It's likely an Ethernet interface
-                std::string interfaceId = iface.interfaceName;                
-                
+                std::string interfaceId = iface.interfaceName;
+
                 const u_char* ethHeader = packetData;
                 uint16_t etherType = ntohs(*reinterpret_cast<const uint16_t*>(ethHeader + 12)); // Extract the Ethernet frame type                
-                
+
                 const u_char* ipHeader = packetData + EthernetHeaderSize; // Skip Ethernet header
                 struct Ipv4Header* ip = (struct Ipv4Header*)ipHeader;
 
@@ -380,7 +380,7 @@ namespace DataCollection
                 packet.applicationData.assign(payload, payload + payloadLength);
 
                 pcap_close(handle);
-                
+
             }
             else if (linkType == WifiFrame || strstr(iface.interfaceDescription.c_str(), "Wi-Fi") || strstr(iface.interfaceName.c_str(), "Wifi"))
             {
@@ -388,8 +388,8 @@ namespace DataCollection
                 const u_char* wifiHeader = packetData;
 
                 // Extract the frame control field (2 bytes)
-                uint16_t frameControl = wifiHeader[0] | (wifiHeader[1] << 8);                     
-                    
+                uint16_t frameControl = wifiHeader[0] | (wifiHeader[1] << 8);
+
                 const u_char* ipHeader = packetData + WiFiHeaderSize; // Skip Wi-Fi header
                 struct Ipv4Header* ip = (struct Ipv4Header*)ipHeader;
 
@@ -424,7 +424,7 @@ namespace DataCollection
                 packet.applicationData.assign(payload, payload + payloadLength);
 
                 pcap_close(handle);
-                    
+
             }
             else
             {
@@ -448,7 +448,7 @@ namespace DataCollection
             logger.Log("An error occurred!");
             std::cerr << "An error occurred!";
         }
-        
+
     }
 
     void PacketCollector::ProcessIpv6Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface)
@@ -576,7 +576,7 @@ namespace DataCollection
     {
         // Handle interrupt signal (Ctrl + C) to stop packet capture
         std::cout << "Cleaning up and exiting..." << std::endl;
-        g_programShouldExit = 1;        
+        g_programShouldExit = 1;
     }
 
     // call the non-static SignalHandler through an instance
@@ -610,7 +610,7 @@ namespace DataCollection
         {
             threads.emplace_back([this, &iface] { CapturePackets(iface); });
             startBarrier.fetch_add(1, std::memory_order_relaxed); // Increment the barrier count
-        }        
+        }
 
         // Wait for all threads to be ready to capture
         std::unique_lock<std::mutex> startLock(startMutex);
@@ -640,7 +640,7 @@ namespace DataCollection
             startBarrier.fetch_sub(1, std::memory_order_relaxed); // Release the thread from the barrier
             return;
         }
-       
+
         while (isCapturing.load(std::memory_order_relaxed))
         {
             struct pcap_pkthdr header;
@@ -890,5 +890,246 @@ namespace DataCollection
 
         return data;
     }
+
+
+
+    // data container to store training and testing data
+    Data::Data()
+    {
+        featureVector = new std::vector<uint8_t>;
+    }
+
+    Data::~Data()
+    {
+
+    }
+
+    void Data::SetFeatureVector(std::vector<uint8_t>* vect)
+    {
+        featureVector = vect;
+    }
+
+    void Data::AppendToFeatureVector(uint8_t val)
+    {
+        featureVector->push_back(val);
+    }
+
+    void Data::SetLAbel(uint8_t val)
+    {
+        label = val;
+    }
+
+    void Data::SetEnumLabel(int val)
+    {
+        enumLabel = val;
+    }
+
+    int Data::GetFeatureVectorSize()
+    {
+        return featureVector->size();
+    }
+
+    uint8_t Data::GetLabel()
+    {
+        return label;
+    }
+
+    uint8_t Data::GetEnumLabel()
+    {
+        return enumLabel;
+    }
+
+    std::vector<uint8_t>* Data::GetFeatureVector()
+    {
+        return featureVector;
+    }
+
+
+    // data handler
+
+    // constructor
+    DataHandler::DataHandler()
+    {
+        dataArray = new std::vector<Data*>;
+        trainingData = new std::vector<Data*>;
+        testData = new std::vector<Data*>;
+        validationData = new std::vector<Data*>;
+    }
+
+    // destructor
+    DataHandler::~DataHandler()
+    {
+        // feree dynamically allocated stack
+    }
+
+    void DataHandler::ReadFeatureVector(std::string path)
+    {
+        uint32_t header[4]; // MAGIC|NUM IMAGES|ROWSIZE|COLSIZE
+        unsigned char bytes[4];
+        FILE* f = fopen(path.c_str(), "r");
+        if (f)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                if (fread(bytes, sizeof(bytes), 1, f))
+                {
+                    header[i] = ConvertToLilEndian(bytes);
+                }
+            }
+            printf("Done getting input file header");
+            int imageSize = header[2] * header[3];
+            for (int i = 0; i < header[1]; i++)
+            {
+                Data* d = new Data();
+                uint8_t element[1];
+                for (int j = 0; j < imageSize; j++)
+                {
+                    if (fread(element, sizeof(element), 1, f))
+                    {
+                        d->AppendToFeatureVector(element[0]);
+                    }
+                    else
+                    {
+                        printf("Error reading from file");
+                        exit(1);
+                    }
+                }
+                dataArray->push_back(d);
+            }
+            printf("Successfully read and stored feature vectors", dataArray->size());
+        }
+        else
+        {
+            printf("Could not find file\n");
+            exit(1);
+        }
+    }
+
+    void DataHandler::ReadFeatureLabel(std::string path)
+    {
+        uint32_t header[2]; // MAGIC|NUM IMAGES
+        unsigned char bytes[4];
+        FILE* f = fopen(path.c_str(), "r");
+        if (f)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                if (fread(bytes, sizeof(bytes), 1, f))
+                {
+                    header[i] = ConvertToLilEndian(bytes);
+                }
+            }
+            printf("Done getting label file header");
+            for (int i = 0; i < header[1]; i++)
+            {               
+                uint8_t element[1];
+                
+                if (fread(element, sizeof(element), 1, f))
+                {
+                    dataArray->at(i)->SetLAbel(element[0]);
+                }
+                else
+                {
+                    printf("Error reading from file");
+                    exit(1);
+                }
+            }
+            printf("Successfully read and stored label");
+        }
+        else
+        {
+            printf("Could not find file\n");
+            exit(1);
+        }
+    }
+
+    void DataHandler::SpliData()
+    {
+        std::unordered_set<int> usedIndexes;
+        int trainSize = dataArray->size() * TRAIN_SET_PERCENT;
+        int testSize = dataArray->size() * TEST_SET_PERCENT;
+        int validateSize = dataArray->size() * VALIDATION_PERCENT;
+
+        // Training data
+        int count = 0;
+
+        while (count < trainSize)
+        {
+            int randomIndex = rand() % dataArray->size(); // this will give a random number between 0 and dataArray->size() -1
+            if (usedIndexes.find(randomIndex) == usedIndexes.end())
+            {
+                trainingData->push_back(dataArray->at(randomIndex));
+                usedIndexes.insert(randomIndex);
+                count++;
+            }
+        }
+
+        // Test data
+        count = 0;
+        while (count < testSize)
+        {
+            int randomIndex = rand() % dataArray->size(); // this will give a random number between 0 and dataArray->size() -1
+            if (usedIndexes.find(randomIndex) == usedIndexes.end())
+            {
+                testData->push_back(dataArray->at(randomIndex));
+                usedIndexes.insert(randomIndex);
+                count++;
+            }
+        }
+
+        // Validation data
+        count = 0;
+        while (count < validateSize)
+        {
+            int randomIndex = rand() % dataArray->size(); // this will give a random number between 0 and dataArray->size() -1
+            if (usedIndexes.find(randomIndex) == usedIndexes.end())
+            {
+                validationData->push_back(dataArray->at(randomIndex));
+                usedIndexes.insert(randomIndex);
+                count++;
+            }
+        }
+
+        printf("Training data size: %lu.", trainingData->size());
+        printf("Testing data size: %lu.", testData->size());
+        printf("Validation data size: %lu.", validationData->size());
+    }
+
+    void DataHandler::CountClasses()
+    {
+        int count = 0;
+        for (unsigned i = 0; i < dataArray->size(); i++)
+        {
+            if (classMap.find(dataArray->at(i)->GetLabel()) == classMap.end())
+            {
+                classMap[dataArray->at(i)->GetLabel()] = count;
+                dataArray->at(i)->SetEnumLabel(count);
+                count++;
+            }
+        }
+        numClasses = count;
+        printf("Succesfully extracted unique classes");
+    }
+
+    uint32_t DataHandler::ConvertToLilEndian(const unsigned char* bytes)
+    {
+        return (uint32_t)(bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | (bytes[3]);
+    }
+
+    std::vector<Data*>* DataHandler::GetTrainingData()
+    {
+        return trainingData;
+    }
+
+    std::vector<Data*>* DataHandler::GetTestData()
+    {
+        return testData;
+    }
+
+    std::vector<Data*>* DataHandler::GetValidationData()
+    {
+        return validationData;
+    }
+   
 
 }
