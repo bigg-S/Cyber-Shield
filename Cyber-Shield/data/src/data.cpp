@@ -944,6 +944,16 @@ namespace DataCollection
         return featureVector;
     }
 
+    void Data::SetDistance(double val)
+    {
+        distance = val;
+    }
+
+    double Data::GetDistance()
+    {
+        return distance;
+    }
+
 
     // data handler
 

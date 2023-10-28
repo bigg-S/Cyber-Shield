@@ -285,6 +285,8 @@ namespace DataCollection
         uint8_t label;
         int enumLabel; //
 
+        double distance;
+
     public:
         Data();
         ~Data();
@@ -296,8 +298,11 @@ namespace DataCollection
         int GetFeatureVectorSize();
         uint8_t GetLabel();
         uint8_t GetEnumLabel();
+        double GetDistance();
 
         std::vector<uint8_t>* GetFeatureVector();
+
+        void SetDistance(double val);
     };
 
     // Data handler (implements logic to read in, spil, count unique classes, pass aroud all kinds of data)
