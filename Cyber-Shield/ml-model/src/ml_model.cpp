@@ -15,16 +15,42 @@ namespace PacketAnalyzer
 	KNN::KNN(int val)
 	{
 		k = val;
+		neighbors = nullptr;
+		trainingData = nullptr;
+		testData = nullptr;
+		validationData = nullptr;
 	}
 
 	KNN::KNN()
 	{
-		// dosomething
+		k = 3; // Default value for k
+		neighbors = nullptr;
+		trainingData = nullptr;
+		testData = nullptr;
+		validationData = nullptr;
 	}
 
 	KNN::~KNN()
 	{
-		// do something
+		if (neighbors) {
+			delete neighbors;
+			neighbors = nullptr;
+		}
+
+		if (trainingData) {
+			delete trainingData;
+			trainingData = nullptr;
+		}
+
+		if (testData) {
+			delete testData;
+			testData = nullptr;
+		}
+
+		if (validationData) {
+			delete validationData;
+			validationData = nullptr;
+		}
 	}
 
 

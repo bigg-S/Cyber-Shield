@@ -15,6 +15,9 @@
 #include <atomic>
 #include <csignal>
 #include <WinSock2.h>
+#include <chrono>
+#include <random>
+#include <random>
 
 #include <pcap.h>
 
@@ -278,29 +281,42 @@ namespace DataCollection
         std::string CollectData();
     };
 
-    // test data container (storing our data)
+    struct Packet
+    {
+        int number;
+        double time;
+        std::string source;
+        std::string destination;
+        std::string protocol;
+        int length;
+        std::string ttl;
+        std::string info;
+    };
+
     class Data
     {
-        std::vector<uint8_t>* featureVector;
-        uint8_t label;
-        int enumLabel; //
-
+        std::vector<Packet>* featureVector;
+        int label;
+        int enumLabel;
         double distance;
 
     public:
         Data();
         ~Data();
-        void SetFeatureVector(std::vector<uint8_t>*);
-        void AppendToFeatureVector(uint8_t);
-        void SetLAbel(uint8_t);
+
+        Packet packet;
+
+        void SetFeatureVector(std::vector<Packet>*);
+        void AppendToFeatureVector(const Packet&);  // Changed the parameter to const Packet&
+        void SetLabel(int);  // Corrected the function name from SetLAbel to SetLabel
         void SetEnumLabel(int);
 
         int GetFeatureVectorSize();
-        uint8_t GetLabel();
-        uint8_t GetEnumLabel();
+        int GetLabel();
+        int GetEnumLabel();
         double GetDistance();
 
-        std::vector<uint8_t>* GetFeatureVector();
+        std::vector<Packet>* GetFeatureVector();
 
         void SetDistance(double val);
     };
@@ -328,10 +344,8 @@ namespace DataCollection
 
         void ReadFeatureVector(std::string path);
         void ReadFeatureLabel(std::string path);
-        void SpliData();
+        void SplitData();
         void CountClasses();
-
-        uint32_t ConvertToLilEndian(const unsigned char* bytes);
 
         std::vector<Data*>* GetTrainingData();
         std::vector<Data*>* GetTestData();

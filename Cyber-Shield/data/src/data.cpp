@@ -253,7 +253,7 @@ namespace DataCollection
         }
         else
         {
-            std::cerr << "No packet capture operation at the moment";
+            std::cerr << "No packet capture operation at the moment\n";
         }
     }
 
@@ -891,30 +891,32 @@ namespace DataCollection
         return data;
     }
 
-
-
     // data container to store training and testing data
     Data::Data()
     {
-        featureVector = new std::vector<uint8_t>;
+        featureVector = new std::vector<Packet>;
     }
 
     Data::~Data()
     {
-
+        if (featureVector != nullptr)
+        {
+            delete featureVector;
+            featureVector = nullptr;
+        }
     }
 
-    void Data::SetFeatureVector(std::vector<uint8_t>* vect)
+    void Data::SetFeatureVector(std::vector<Packet>* vect)
     {
         featureVector = vect;
     }
 
-    void Data::AppendToFeatureVector(uint8_t val)
+    void Data::AppendToFeatureVector(const Packet& val)
     {
         featureVector->push_back(val);
     }
 
-    void Data::SetLAbel(uint8_t val)
+    void Data::SetLabel(int val)  // Corrected the function name from SetLAbel to SetLabel
     {
         label = val;
     }
@@ -929,17 +931,17 @@ namespace DataCollection
         return featureVector->size();
     }
 
-    uint8_t Data::GetLabel()
+    int Data::GetLabel()
     {
         return label;
     }
 
-    uint8_t Data::GetEnumLabel()
+    int Data::GetEnumLabel()
     {
         return enumLabel;
     }
 
-    std::vector<uint8_t>* Data::GetFeatureVector()
+    std::vector<Packet>* Data::GetFeatureVector()
     {
         return featureVector;
     }
@@ -970,139 +972,187 @@ namespace DataCollection
     DataHandler::~DataHandler()
     {
         // feree dynamically allocated stack
+        if (dataArray)
+        {
+            for (Data* data : *dataArray)
+            {
+                delete data;
+            }
+            delete dataArray;
+            dataArray = nullptr;
+        }
+
+        if (trainingData)
+        {
+            for (Data* data : *trainingData)
+            {
+                delete data;
+            }
+            delete trainingData;
+            trainingData = nullptr;
+        }
+
+        if (testData)
+        {
+            for (Data* data : *testData)
+            {
+                delete data;
+            }
+            delete testData;
+            testData = nullptr;
+        }
+
+        if (validationData)
+        {
+            for (Data* data : *validationData)
+            {
+                delete data;
+            }
+            delete validationData;
+            validationData = nullptr;
+        }
+
+        _fcloseall();
     }
 
     void DataHandler::ReadFeatureVector(std::string path)
     {
-        uint32_t header[4]; // MAGIC|NUM IMAGES|ROWSIZE|COLSIZE
-        unsigned char bytes[4];
-        FILE* f = fopen(path.c_str(), "r");
-        if (f)
+        std::ifstream file(path);        
+
+        if (!file.is_open())
         {
-            for (int i = 0; i < 4; i++)
-            {
-                if (fread(bytes, sizeof(bytes), 1, f))
-                {
-                    header[i] = ConvertToLilEndian(bytes);
-                }
-            }
-            printf("Done getting input file header");
-            int imageSize = header[2] * header[3];
-            for (int i = 0; i < header[1]; i++)
-            {
-                Data* d = new Data();
-                uint8_t element[1];
-                for (int j = 0; j < imageSize; j++)
-                {
-                    if (fread(element, sizeof(element), 1, f))
-                    {
-                        d->AppendToFeatureVector(element[0]);
-                    }
-                    else
-                    {
-                        printf("Error reading from file");
-                        exit(1);
-                    }
-                }
-                dataArray->push_back(d);
-            }
-            printf("Successfully read and stored feature vectors", dataArray->size());
+            std::cerr << "Failed to open the CSV file: " << path << std::endl;
+            return;
         }
-        else
+        
+        std::string line;
+        std::getline(file, line); // skip the header
+
+        printf("Done getting input file header\n");
+
+        while (std::getline(file, line))
         {
-            printf("Could not find file\n");
-            exit(1);
+            std::istringstream ss(line);
+            std::string token;
+
+            Data* packet = new Data();
+            std::vector<std::string> fields; // store all the fields in avector
+
+            while (std::getline(ss, token, ','))
+            {
+                fields.push_back(token);
+            }
+
+            // parse the data point features
+            if (fields.size() == 8)
+            {
+                packet->packet.number = std::stoi(fields[0].substr(1, fields[0].size() - 1));
+                packet->packet.time = std::stod(fields[1].substr(1, fields[0].size() - 1));
+                packet->packet.source = fields[2];
+                packet->packet.destination = fields[3];
+                packet->packet.protocol = fields[4];
+                packet->packet.length = std::stoi(fields[5].substr(1, fields[0].size() - 1));
+                packet->packet.ttl = (fields[6].substr(1, fields[0].size() - 1));
+                packet->packet.info = fields[7];
+
+                dataArray->push_back(packet);
+            }            
+            
         }
+
+        std::cout << "Successfully read and stored feature vectors, " << dataArray->size() << std::endl;
+       
     }
 
     void DataHandler::ReadFeatureLabel(std::string path)
     {
-        uint32_t header[2]; // MAGIC|NUM IMAGES
-        unsigned char bytes[4];
-        FILE* f = fopen(path.c_str(), "r");
-        if (f)
+        std::ifstream file(path);
+
+        if (!file.is_open())
         {
-            for (int i = 0; i < 2; i++)
+            std::cerr << "Failed to open the CSV file: " << path << std::endl;
+            return;
+        }
+
+        std::string line;
+        std::getline(file, line); // Read and discard the header
+
+        printf("Done getting label file header\n");
+
+        int dataIndex = 0;
+        
+        while (std::getline(file, line))
+        {               
+            std::istringstream ss(line);
+            std::string token;
+
+            std::vector<std::string> fields;
+
+            // split the line into columns
+            while (std::getline(ss, token, ','))
             {
-                if (fread(bytes, sizeof(bytes), 1, f))
-                {
-                    header[i] = ConvertToLilEndian(bytes);
-                }
+                fields.push_back(token);
             }
-            printf("Done getting label file header");
-            for (int i = 0; i < header[1]; i++)
-            {               
-                uint8_t element[1];
-                
-                if (fread(element, sizeof(element), 1, f))
-                {
-                    dataArray->at(i)->SetLAbel(element[0]);
-                }
-                else
-                {
-                    printf("Error reading from file");
-                    exit(1);
-                }
+
+            // Extract the label now
+            if (dataIndex < dataArray->size())
+            {
+                // label is the last column in the csv file
+                int label = std::stoi(fields.back());
+
+                // append label to corresponding data point
+                (*dataArray)[dataIndex]->SetLabel(label);
+                dataIndex;
             }
-            printf("Successfully read and stored label");
+            else
+            {
+                std::cerr << "Error: Mismatch between the number of labels and data points." << std::endl;
+                return;
+            }
         }
-        else
-        {
-            printf("Could not find file\n");
-            exit(1);
-        }
+
+        std::cout << "Successfully read and stored label" << std::endl;
+        
     }
 
-    void DataHandler::SpliData()
+    void DataHandler::SplitData()
     {
-        std::unordered_set<int> usedIndexes;
-        int trainSize = dataArray->size() * TRAIN_SET_PERCENT;
-        int testSize = dataArray->size() * TEST_SET_PERCENT;
-        int validateSize = dataArray->size() * VALIDATION_PERCENT;
+        std::random_device rd;
+        std::default_random_engine engine(rd());
+        unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+        engine.seed(seed);
 
-        // Training data
-        int count = 0;
+        // Shuffle the data randomly
+        std::shuffle(dataArray->begin(), dataArray->end(), engine);
 
-        while (count < trainSize)
+        int dataSize = dataArray->size();
+        int trainSize = static_cast<int>(dataSize * TRAIN_SET_PERCENT);
+        int testSize = static_cast<int>(dataSize * TEST_SET_PERCENT);
+        int validateSize = dataSize - trainSize - testSize;
+
+        trainingData->clear();
+        testData->clear();
+        validationData->clear();
+
+        for (int i = 0; i < dataSize; ++i)
         {
-            int randomIndex = rand() % dataArray->size(); // this will give a random number between 0 and dataArray->size() -1
-            if (usedIndexes.find(randomIndex) == usedIndexes.end())
+            if (i < trainSize)
             {
-                trainingData->push_back(dataArray->at(randomIndex));
-                usedIndexes.insert(randomIndex);
-                count++;
+                trainingData->push_back(dataArray->at(i));
+            }
+            else if (i < trainSize + testSize)
+            {
+                testData->push_back(dataArray->at(i));
+            }
+            else
+            {
+                validationData->push_back(dataArray->at(i));
             }
         }
 
-        // Test data
-        count = 0;
-        while (count < testSize)
-        {
-            int randomIndex = rand() % dataArray->size(); // this will give a random number between 0 and dataArray->size() -1
-            if (usedIndexes.find(randomIndex) == usedIndexes.end())
-            {
-                testData->push_back(dataArray->at(randomIndex));
-                usedIndexes.insert(randomIndex);
-                count++;
-            }
-        }
-
-        // Validation data
-        count = 0;
-        while (count < validateSize)
-        {
-            int randomIndex = rand() % dataArray->size(); // this will give a random number between 0 and dataArray->size() -1
-            if (usedIndexes.find(randomIndex) == usedIndexes.end())
-            {
-                validationData->push_back(dataArray->at(randomIndex));
-                usedIndexes.insert(randomIndex);
-                count++;
-            }
-        }
-
-        printf("Training data size: %lu.", trainingData->size());
-        printf("Testing data size: %lu.", testData->size());
-        printf("Validation data size: %lu.", validationData->size());
+        std::cout << "Training data size: " << trainingData->size() << std::endl;
+        std::cout << "Testing data size: " << testData->size() << std::endl;
+        std::cout << "Validation data size: " << validationData->size() << std::endl;
     }
 
     void DataHandler::CountClasses()
@@ -1118,12 +1168,7 @@ namespace DataCollection
             }
         }
         numClasses = count;
-        printf("Succesfully extracted unique classes");
-    }
-
-    uint32_t DataHandler::ConvertToLilEndian(const unsigned char* bytes)
-    {
-        return (uint32_t)(bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | (bytes[3]);
+        std::cout << "Succesfully extracted unique classes" << std::endl;
     }
 
     std::vector<Data*>* DataHandler::GetTrainingData()
