@@ -953,7 +953,7 @@ namespace DataCollection
 
     double Data::GetDistance()
     {
-        return distance;
+        return  distance;
     }
 
 
@@ -1168,7 +1168,7 @@ namespace DataCollection
             }
         }
         numClasses = count;
-        std::cout << "Succesfully extracted unique classes" << std::endl;
+        std::cout << "Succesfully extracted unique classes, " << numClasses << std::endl;
     }
 
     std::vector<Data*>* DataHandler::GetTrainingData()

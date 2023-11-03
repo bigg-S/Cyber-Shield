@@ -30,6 +30,10 @@ namespace PacketAnalyzer
 		double ValidatePerformance();
 		double TestPerformance();
 
+		// Add seriali functions to save and load the model
+		void SaveModel(const std::string& fileName);
+		void LoadModel(const std::string& fileName);
+
 	};
 }
 

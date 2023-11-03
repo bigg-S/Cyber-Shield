@@ -8,6 +8,7 @@ main.cpp
 Cyber-Shield.vcxproj
 Cyber-Shield.vcxproj.filters
 Cyber-Shield.vcxproj.user
-.vs
 miscellaneous
 dataset
+.vs
+boost

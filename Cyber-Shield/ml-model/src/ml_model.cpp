@@ -210,4 +210,24 @@ namespace PacketAnalyzer
 		return currentPerformance;
 
 	}
+
+	void KNN::SaveModel(const std::string& fileName)
+	{
+		std::ofstream ofs(fileName);
+		boost::archive::text_oarchive ar(ofs);
+		ar << *this; // serialize the KNN object to the file
+	}
+
+	void KNN::LoadModel(const std::string& fileName)
+	{
+		std::ifstream ifs(fileName);
+		if (!ifs.is_open())
+		{
+			std::cerr << "Failed to open model file: " << fileName << std::endl;
+			return;
+		}
+
+		boost::archive::text_iarchive ar(ifs);
+		ar >> *this;
+	}
 }

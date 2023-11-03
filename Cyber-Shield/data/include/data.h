@@ -3,18 +3,19 @@
 
 #include <fstream>
 #include <sstream>
-#include <mutex>
-#include <thread>
-#include <array>
-#include <map>
-#include <unordered_set>
 #include <stdio.h>
 #include <stdint.h>
 #include <cstdint>
+
+#include <mutex>
+#include <thread>
+
 #include <condition_variable>
 #include <atomic>
 #include <csignal>
+
 #include <WinSock2.h>
+
 #include <chrono>
 #include <random>
 #include <random>
@@ -24,6 +25,12 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <array>
+#include <map>
+#include <unordered_set>
+
+#include "boost/archive/text_iarchive.hpp";
+#include "boost/archive/text_oarchive.hpp";
 
 namespace DataCollection
 {
@@ -64,15 +71,15 @@ namespace DataCollection
     // Define the structure for a network packet
     struct NetworkPacket
     {
-        std::string networkInterface;      // Interface from which the packet is captured
-        EthernetHeader ethernetHeader;    // Ethernet header
-        Ipv4Header ipHeader;                // IP header
-        uint16_t sourcePort;              // Source port (e.g., for TCP or UDP)
-        uint16_t destinationPort;         // Destination port (e.g., for TCP or UDP)
-        uint32_t sequenceNumber;          // Sequence number (e.g., for TCP)
-        uint32_t acknowledgmentNumber;    // Acknowledgment number (e.g., for TCP)
-        uint16_t flags;                   // Flags (e.g., for TCP)
-        uint16_t checksum;                // Checksum (e.g., for TCP or UDP)
+        std::string networkInterface;     
+        EthernetHeader ethernetHeader;    
+        Ipv4Header ipHeader;              
+        uint16_t sourcePort;              
+        uint16_t destinationPort;         
+        uint32_t sequenceNumber;          
+        uint32_t acknowledgmentNumber;    
+        uint16_t flags;                   
+        uint16_t checksum;                
         std::vector<uint8_t> applicationData;  // Application layer data (payload)
         std::string timestamp;
         int packetNumber;
