@@ -1,38 +1,42 @@
 #ifndef ML_MODEL_H
 #define ML_MODEL_H
 
-#include "data.h";
+#include "data.h"
 
 namespace PacketAnalyzer
 {
 	class KNN
 	{
 		int k;
-		std::vector<DataCollection::Data*>* neighbors;
-		std::vector<DataCollection::Data*>* trainingData;
-		std::vector<DataCollection::Data*>* testData;
-		std::vector<DataCollection::Data*>* validationData;
+		std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> neighbors;
+		std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> trainingData;
+		std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> testData;
+		std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> validationData;
 
 	public:
 		KNN(int);
 		KNN();
 		~KNN();
 
+		// Data serialization
+		template<class Archive>
+		void serialize(Archive& ar, const unsigned int);
+		void SaveKNN(std::string& fileName);
+		void LoadKNN(std::string& fileName);
 
-		void FindKNearest(DataCollection::Data* queryPoint);
-		void SetTrainingData(std::vector<DataCollection::Data*>* vect);
-		void SetTestData(std::vector<DataCollection::Data*>* vect);
-		void SetValidationData(std::vector<DataCollection::Data*>* vect);
+		void SavePacket(const DataCollection::Packet&, const std::string& fileName);
+		DataCollection::Packet LoadPacket(const std::string& fileName);
+
+		void FindKNearest(std::shared_ptr<DataCollection::Data> queryPoint);
+		void SetTrainingData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect);
+		void SetTestData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect);
+		void SetValidationData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect);
 		void SetK(int); // change k without reloading the data
 
 		int Predict(); // return predicted class
-		double CalculateDistance(DataCollection::Data* queryPoint, DataCollection::Data* input);
+		double CalculateDistance(std::shared_ptr<DataCollection::Data> queryPoint, std::shared_ptr<DataCollection::Data> input);
 		double ValidatePerformance();
 		double TestPerformance();
-
-		// Add seriali functions to save and load the model
-		void SaveModel(const std::string& fileName);
-		void LoadModel(const std::string& fileName);
 
 	};
 }

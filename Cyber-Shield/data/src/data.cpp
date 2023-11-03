@@ -892,21 +892,39 @@ namespace DataCollection
     }
 
     // data container to store training and testing data
+    template <class Archive>
+    void Packet::serialize(Archive &ar, const unsigned int version)
+    {
+        ar& number;
+        ar& time;
+        ar& source;
+        ar& destination;
+        ar& protocol;
+        ar& length;
+        ar& ttl;
+        ar& info;
+    }
+
     Data::Data()
     {
-        featureVector = new std::vector<Packet>;
+        featureVector = std::make_shared<std::vector<Packet>>();
     }
 
     Data::~Data()
     {
-        if (featureVector != nullptr)
-        {
-            delete featureVector;
-            featureVector = nullptr;
-        }
+        // clean dynamically allocated memory
     }
 
-    void Data::SetFeatureVector(std::vector<Packet>* vect)
+    template<class Archive>
+    void Data::serialize(Archive& ar, const unsigned int version)
+    {
+        ar& featureVector;
+        ar& label;
+        ar& enumLabel;
+        ar& distance;
+    }
+
+    void Data::SetFeatureVector(std::shared_ptr<std::vector<Packet>> vect)
     {
         featureVector = vect;
     }
@@ -941,7 +959,7 @@ namespace DataCollection
         return enumLabel;
     }
 
-    std::vector<Packet>* Data::GetFeatureVector()
+    std::shared_ptr<std::vector<Packet>> Data::GetFeatureVector()
     {
         return featureVector;
     }
@@ -962,57 +980,41 @@ namespace DataCollection
     // constructor
     DataHandler::DataHandler()
     {
-        dataArray = new std::vector<Data*>;
-        trainingData = new std::vector<Data*>;
-        testData = new std::vector<Data*>;
-        validationData = new std::vector<Data*>;
+       dataArray = std::make_shared<std::vector<std::shared_ptr<Data>>>();
+       trainingData = std::make_shared<std::vector<std::shared_ptr<Data>>>();
+       testData = std::make_shared<std::vector<std::shared_ptr<Data>>>();
+       validationData = std::make_shared<std::vector<std::shared_ptr<Data>>>();
     }
 
     // destructor
     DataHandler::~DataHandler()
     {
-        // feree dynamically allocated stack
-        if (dataArray)
-        {
-            for (Data* data : *dataArray)
-            {
-                delete data;
-            }
-            delete dataArray;
-            dataArray = nullptr;
-        }
-
-        if (trainingData)
-        {
-            for (Data* data : *trainingData)
-            {
-                delete data;
-            }
-            delete trainingData;
-            trainingData = nullptr;
-        }
-
-        if (testData)
-        {
-            for (Data* data : *testData)
-            {
-                delete data;
-            }
-            delete testData;
-            testData = nullptr;
-        }
-
-        if (validationData)
-        {
-            for (Data* data : *validationData)
-            {
-                delete data;
-            }
-            delete validationData;
-            validationData = nullptr;
-        }
-
         _fcloseall();
+    }
+
+    template<class Archive>
+    void DataHandler::serialize(Archive& ar, const unsigned int version)
+    {
+        ar& dataArray;
+        ar& trainingData;
+        ar& testData;
+        ar& validationData;
+    }
+
+    // save DataHandler instance
+    void DataHandler::SaveDataHandler(std::string& fileName)
+    {
+        std::ofstream ofs(fileName);
+        boost::archive::text_oarchive oa(ofs);
+        oa << *this;
+    }
+
+    // load the DataHandler instace
+    void DataHandler::LoadDataHandler(std::string& fileName)
+    {
+        std::ifstream ifs(fileName);
+        boost::archive::text_iarchive ia(ifs);
+        ia >> *this;
     }
 
     void DataHandler::ReadFeatureVector(std::string path)
@@ -1035,7 +1037,7 @@ namespace DataCollection
             std::istringstream ss(line);
             std::string token;
 
-            Data* packet = new Data();
+            std::shared_ptr<Data> packet = std::make_shared<Data>();
             std::vector<std::string> fields; // store all the fields in avector
 
             while (std::getline(ss, token, ','))
@@ -1171,17 +1173,17 @@ namespace DataCollection
         std::cout << "Succesfully extracted unique classes, " << numClasses << std::endl;
     }
 
-    std::vector<Data*>* DataHandler::GetTrainingData()
+    std::shared_ptr<std::vector<std::shared_ptr<Data>>> DataHandler::GetTrainingData()
     {
         return trainingData;
     }
 
-    std::vector<Data*>* DataHandler::GetTestData()
+    std::shared_ptr<std::vector<std::shared_ptr<Data>>> DataHandler::GetTestData()
     {
         return testData;
     }
 
-    std::vector<Data*>* DataHandler::GetValidationData()
+    std::shared_ptr<std::vector<std::shared_ptr<Data>>> DataHandler::GetValidationData()
     {
         return validationData;
     }

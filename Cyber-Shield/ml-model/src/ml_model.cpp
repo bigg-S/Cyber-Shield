@@ -5,9 +5,8 @@
 #include <map>
 #include <stdint.h>
 
-#include "ml_model.h";
-#include "data.h";
-
+#include "ml_model.h"
+#include "data.h"
 
 namespace PacketAnalyzer
 {
@@ -32,31 +31,55 @@ namespace PacketAnalyzer
 
 	KNN::~KNN()
 	{
-		if (neighbors) {
-			delete neighbors;
-			neighbors = nullptr;
-		}
-
-		if (trainingData) {
-			delete trainingData;
-			trainingData = nullptr;
-		}
-
-		if (testData) {
-			delete testData;
-			testData = nullptr;
-		}
-
-		if (validationData) {
-			delete validationData;
-			validationData = nullptr;
-		}
+		// Cleaning up
 	}
 
-
-	void KNN::FindKNearest(DataCollection::Data* queryPoint)
+	template<class Archive>
+	void KNN::serialize(Archive& ar, const unsigned int version)
 	{
-		neighbors = new std::vector<DataCollection::Data*>;
+		ar& k;
+		ar& neighbors;
+		ar& trainingData;
+		ar& testData;
+		ar& validationData;
+	}
+
+	// save KNN instance
+	void KNN::SaveKNN(std::string& fileName)
+	{
+		std::ofstream ofs(fileName);
+		boost::archive::text_oarchive oa(ofs);
+		oa << *this;
+	}
+
+	// load the KNN instace
+	void KNN::LoadKNN(std::string& fileName)
+	{
+		std::ifstream ifs(fileName);
+		boost::archive::text_iarchive ia(ifs);
+		ia >> *this;
+	}
+
+	// for the packet structure
+	void KNN::SavePacket(const DataCollection::Packet& packet, const std::string& fileName)
+	{
+		std::ofstream ofs(fileName);
+		boost::archive::text_oarchive oa(ofs);
+		oa << packet;
+	}
+
+	DataCollection::Packet KNN::LoadPacket(const std::string& fileName)
+	{
+		DataCollection::Packet packet;
+		std::ifstream ifs(fileName);
+		boost::archive::text_iarchive ia(ifs);
+		ia >> packet;
+		return packet;
+	}
+
+	void KNN::FindKNearest(std::shared_ptr<DataCollection::Data> queryPoint)
+	{
+		neighbors = std::make_shared<std::vector<std::shared_ptr<DataCollection::Data>>>();
 		double min = std::numeric_limits<double>::max();
 		double prevMin = min;
 		int index = 0;
@@ -97,17 +120,17 @@ namespace PacketAnalyzer
 		}
 	}
 
-	void KNN::SetTrainingData(std::vector<DataCollection::Data*>* vect)
+	void KNN::SetTrainingData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect)
 	{
 		trainingData = vect;
 	}
 
-	void KNN::SetTestData(std::vector<DataCollection::Data*>* vect)
+	void KNN::SetTestData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect)
 	{
 		testData = vect;
 	}
 
-	void KNN::SetValidationData(std::vector<DataCollection::Data*>* vect)
+	void KNN::SetValidationData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect)
 	{
 		validationData = vect;
 	}
@@ -147,12 +170,12 @@ namespace PacketAnalyzer
 		return best;
 	}
 
-	double KNN::CalculateDistance(DataCollection::Data* queryPoint, DataCollection::Data* input)
+	double KNN::CalculateDistance(std::shared_ptr<DataCollection::Data> queryPoint, std::shared_ptr<DataCollection::Data> input)
 	{
 		double distance = 0.0;
 		if (queryPoint->GetFeatureVectorSize() != input->GetFeatureVectorSize())
 		{
-			printf("Error: Vector Size mismatch\n");
+			std::cerr<<"Error: Vector Size mismatch\n";
 			exit(1);
 		}
 
@@ -160,11 +183,21 @@ namespace PacketAnalyzer
 		for (unsigned i; i < queryPoint->GetFeatureVectorSize(); i++)
 		{
 			distance += pow(queryPoint->GetFeatureVector()->at(i) - input->GetFeatureVector()->at(i), 2);
+			std::cout << "Distance: " << distance;
 		}
 		distance = sqrt(distance);
 		return distance;
 		#elif defined MANHATTAN
-		// Put manhattan implementation here
+		// manhattan distance calculation
+		double manhattanDistance = 0.0;
+		for (unsigned i = 0; i < queryPoint->GetFeatureVectorSize(); i++)
+		{
+			manhattanDistance += abs(queryPoint->GetFeatureVector()->at(i) - input->GetFeatureVector()->at(i));
+		}
+		return manhattanDistance;
+
+		else
+			return -1.0
 		#endif
 
 	}
@@ -175,7 +208,7 @@ namespace PacketAnalyzer
 		int count = 0;
 		int dataIndex = 0;
 
-		for (DataCollection::Data* queryPoint : *validationData)
+		for (std::shared_ptr<DataCollection::Data> queryPoint : *validationData)
 		{
 			FindKNearest(queryPoint);
 			int prediction = Predict();
@@ -196,7 +229,7 @@ namespace PacketAnalyzer
 		double currentPerformance = 0.0;
 		int count = 0;
 
-		for (DataCollection::Data* queryPoint : *testData)
+		for (std::shared_ptr<DataCollection::Data> queryPoint: *testData)
 		{
 			FindKNearest(queryPoint);
 			int prediction = Predict();
@@ -209,25 +242,5 @@ namespace PacketAnalyzer
 		printf("Test performance = %.3f %%\n", currentPerformance);
 		return currentPerformance;
 
-	}
-
-	void KNN::SaveModel(const std::string& fileName)
-	{
-		std::ofstream ofs(fileName);
-		boost::archive::text_oarchive ar(ofs);
-		ar << *this; // serialize the KNN object to the file
-	}
-
-	void KNN::LoadModel(const std::string& fileName)
-	{
-		std::ifstream ifs(fileName);
-		if (!ifs.is_open())
-		{
-			std::cerr << "Failed to open model file: " << fileName << std::endl;
-			return;
-		}
-
-		boost::archive::text_iarchive ar(ifs);
-		ar >> *this;
 	}
 }

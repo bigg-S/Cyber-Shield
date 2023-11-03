@@ -1,6 +1,11 @@
 #ifndef DATA_H
 #define DATA_H
 
+#include "boost/archive/text_iarchive.hpp"
+#include "boost/archive/text_oarchive.hpp"
+#include "boost/serialization/shared_ptr.hpp"
+#include "boost/serialization/vector.hpp"
+
 #include <fstream>
 #include <sstream>
 #include <stdio.h>
@@ -28,9 +33,6 @@
 #include <array>
 #include <map>
 #include <unordered_set>
-
-#include "boost/archive/text_iarchive.hpp";
-#include "boost/archive/text_oarchive.hpp";
 
 namespace DataCollection
 {
@@ -298,11 +300,14 @@ namespace DataCollection
         int length;
         std::string ttl;
         std::string info;
+
+        template <class Archive>
+        void serialize(Archive& ar, const unsigned int);
     };
 
     class Data
     {
-        std::vector<Packet>* featureVector;
+        std::shared_ptr<std::vector<Packet>> featureVector;
         int label;
         int enumLabel;
         double distance;
@@ -313,9 +318,11 @@ namespace DataCollection
 
         Packet packet;
 
-        void SetFeatureVector(std::vector<Packet>*);
-        void AppendToFeatureVector(const Packet&);  // Changed the parameter to const Packet&
-        void SetLabel(int);  // Corrected the function name from SetLAbel to SetLabel
+        template<class Archive>
+        void serialize(Archive& ar, const unsigned int);
+        void SetFeatureVector(std::shared_ptr<std::vector<Packet>>);
+        void AppendToFeatureVector(const Packet&); 
+        void SetLabel(int);
         void SetEnumLabel(int);
 
         int GetFeatureVectorSize();
@@ -323,7 +330,7 @@ namespace DataCollection
         int GetEnumLabel();
         double GetDistance();
 
-        std::vector<Packet>* GetFeatureVector();
+        std::shared_ptr<std::vector<Packet>> GetFeatureVector();
 
         void SetDistance(double val);
     };
@@ -331,10 +338,10 @@ namespace DataCollection
     // Data handler (implements logic to read in, spil, count unique classes, pass aroud all kinds of data)
     class DataHandler
     {
-        std::vector<Data*>* dataArray; // all the data
-        std::vector<Data*>* trainingData;
-        std::vector<Data*>* testData;
-        std::vector<Data*>* validationData;
+        std::shared_ptr<std::vector<std::shared_ptr<Data>>> dataArray;
+        std::shared_ptr<std::vector<std::shared_ptr<Data>>> trainingData;
+        std::shared_ptr<std::vector<std::shared_ptr<Data>>> testData;
+        std::shared_ptr<std::vector<std::shared_ptr<Data>>> validationData;
 
         int numClasses; // number of classes we have
         int featureVectorSize;
@@ -349,14 +356,20 @@ namespace DataCollection
         DataHandler();
         ~DataHandler();
 
+        // Data serialization
+        template<class Archive>
+        void serialize(Archive& ar, const unsigned int);
+        void SaveDataHandler(std::string& fileName);
+        void LoadDataHandler(std::string& fileName);
+
         void ReadFeatureVector(std::string path);
         void ReadFeatureLabel(std::string path);
         void SplitData();
         void CountClasses();
 
-        std::vector<Data*>* GetTrainingData();
-        std::vector<Data*>* GetTestData();
-        std::vector<Data*>* GetValidationData();
+        std::shared_ptr<std::vector<std::shared_ptr<Data>>> GetTrainingData();
+        std::shared_ptr<std::vector<std::shared_ptr<Data>>> GetTestData();
+        std::shared_ptr<std::vector<std::shared_ptr<Data>>> GetValidationData();
     };
 }
 
