@@ -1,12 +1,6 @@
 #define NOMINMAX
 
-#include <cmath>
-#include <limits>
-#include <map>
-#include <stdint.h>
-
 #include "ml_model.h"
-#include "data.h"
 
 namespace PacketAnalyzer
 {
@@ -196,6 +190,15 @@ namespace PacketAnalyzer
 
 	double KNN::TestPerformance()
 	{
+		// Log start of testing
+		std::cout << "Starting performance testing" << std::endl;
+
+		double accuracy = 0.0;
+		double precision = 0.0;
+		double recall = 0.0;
+		double f1Score = 0.0;
+		std::vector<std::vector<int>> confusionMatrix;
+
 		double currentPerformance = 0.0;
 		int count = 0;
 		
@@ -215,8 +218,203 @@ namespace PacketAnalyzer
 				count++;
 			}
 		}
+		double accuracy = static_cast<double>(count) / testData->size();
+
 		currentPerformance = ((double)count * 100) / ((double)testData->size());
 		printf("Test performance = %.3f %%\n", currentPerformance);
+
+		// log accuracy
+		std::cout << "Accuracy: " << accuracy * 100 << std::endl;
+
+		// Calculate and log precision
+		precision = CalculatePrecision(testData);
+		std::cout << "Precision: " << precision << std::endl;
+
+		// Calculate and log recall
+		recall = CalculateRecall(testData);
+		std::cout << "Recall: " << recall << std::endl;
+
+		// Calculate and log F1 score
+		f1Score = CalculateF1Score(testData);
+		std::cout << "F1 Score: " << f1Score << std::endl;
+
+		// Calculate and log confusion matrix
+		CalculateConfusionMatrix(testData, confusionMatrix);
+		std::cout << "Confusion matrix:" << std::endl;
+		for (auto& row : confusionMatrix) 
+		{
+			for (auto count : row) 
+			{
+				std::cout << count << " ";
+			}
+			std::cout << std::endl;
+		}
+
+		// Log end of testing
+		std::cout << "Finished performance testing" << std::endl;
+
 		return currentPerformance;
+	}
+
+	// Calculate precision
+	double KNN::CalculatePrecision(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data) {
+		if (!data || data->size()) 
+		{
+			std::cerr << "Error: Invalid data or label input." << std::endl;
+			return 0.0;
+		}
+
+		int truePositives = 0;
+		int falsePositives = 0;
+
+		for (size_t i = 0; i < data->size(); i++) 
+		{
+			FindKNearest(data->at(i));
+			std::string prediction = Predict();
+			if (prediction == "anomaly" && data->at(i)->GetLabel() == "anomaly") 
+			{
+				truePositives++;
+			}
+			if (prediction == "anomaly" && data->at(i)->GetLabel() == "normal") 
+			{
+				falsePositives++;
+			}
+		}
+
+		if (truePositives + falsePositives == 0) 
+		{
+			return 0.0;
+		}
+
+		return static_cast<double>(truePositives) / (truePositives + falsePositives);
+	}
+
+	// Calculate recall
+	double KNN::CalculateRecall(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data) {
+		if (!data || data->size()) 
+		{
+			std::cerr << "Error: Invalid data or label input." << std::endl;
+			return 0.0;
+		}
+
+		int truePositives = 0;
+		int falseNegatives = 0;
+
+		for (size_t i = 0; i < data->size(); i++) 
+		{
+			FindKNearest(data->at(i));
+			std::string prediction = Predict();
+			if (prediction == "anomaly" && data->at(i)->GetLabel() == "anomaly") 
+			{
+				truePositives++;
+			}
+			if (prediction == "normal" && data->at(i)->GetLabel() == "anomaly") 
+			{
+				falseNegatives++;
+			}
+		}
+
+		if (truePositives + falseNegatives == 0) 
+		{
+			return 0.0;
+		}
+
+		return static_cast<double>(truePositives) / (truePositives + falseNegatives);
+	}
+
+	// Calculate F1-score
+	double KNN::CalculateF1Score(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data)
+	{
+		if (!data || data->size())
+		{
+			std::cerr << "Error: Invalid data or label input." << std::endl;
+			return 0.0;
+		}
+
+		double precision = CalculatePrecision(data);
+		double recall = CalculateRecall(data);
+
+		if (precision + recall == 0) 
+		{
+			return 0.0;
+		}
+
+		return 2.0 * (precision * recall) / (precision + recall);
+	}
+
+	// Calculate confusion matrix
+	void KNN::CalculateConfusionMatrix(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data, std::vector<std::vector<int>>& confusionMatrix) 
+	{
+		if (!data || data->size()) 
+		{
+			std::cerr << "Error: Invalid data or label input." << std::endl;
+			return;
+		}
+
+		confusionMatrix = std::vector<std::vector<int>>(2, std::vector<int>(2, 0));
+
+		for (size_t i = 0; i < data->size(); i++) 
+		{
+			FindKNearest(data->at(i));
+			std::string prediction = Predict();
+			if (data->at(i)->GetLabel() == "normal") 
+			{
+				if (prediction == "normal") 
+				{
+					confusionMatrix[0][0]++; // True negatives
+				}
+				else 
+				{
+					confusionMatrix[0][1]++; // False positives
+				}
+			}
+			else 
+			{
+				if (prediction == "anomaly") 
+				{
+					confusionMatrix[1][1]++; // True positives
+				}
+				else 
+				{
+					confusionMatrix[1][0]++; // False negatives
+				}
+			}
+		}
+	}
+
+	// Cross-validation
+	double KNN::CrossValidation(int numFolds) {
+		if (!validationData) 
+		{
+			std::cerr << "Error: Validation data not set." << std::endl;
+			return 0.0;
+		}
+
+		size_t foldSize = validationData->size() / numFolds;
+		double totalAccuracy = 0.0;
+
+		for (int fold = 0; fold < numFolds; fold++) 
+		{
+			std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>
+				validationFold(new std::vector<std::shared_ptr<DataCollection::Data>>());
+			std::shared_ptr<std::vector<std::string>> labelsFold(new std::vector<std::string>());
+
+			// Split data into folds
+			for (size_t i = 0; i < validationData->size(); i++) 
+			{
+				if (i >= fold * foldSize && i < (fold + 1) * foldSize) 
+				{
+					validationFold->push_back(validationData->at(i));
+					labelsFold->push_back(validationData->at(i)->GetLabel());
+				}
+			}
+
+			SetValidationData(validationFold);
+			double accuracy = ValidatePerformance();
+			totalAccuracy += accuracy;
+		}
+
+		// Average accuracy over folds
+		return totalAccuracy / numFolds;
 	}
 }

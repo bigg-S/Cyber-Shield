@@ -1,5 +1,9 @@
 #ifndef ML_MODEL_H
 #define ML_MODEL_H
+#include <cmath>
+#include <limits>
+#include <map>
+#include <stdint.h>
 
 #include "data.h"
 
@@ -44,8 +48,18 @@ namespace PacketAnalyzer
 		double ValidatePerformance();
 		double TestPerformance();
 
-		const std::vector<std::string>& GetTrueLabels() const;
+		// Calculate precision
+		double CalculatePrecision(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&);
+		// Calculate recall
+		double CalculateRecall(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&);
+		// Calculate F1 score
+		double CalculateF1Score(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&);
+		// Calculate confusion matrix
+		void CalculateConfusionMatrix(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&, std::vector<std::vector<int>>&);
+		// Calculate Cross-validation
+		double CrossValidation(int);
 
+		const std::vector<std::string>& GetTrueLabels() const;
 		const std::vector<std::string>& GetPredictedLabels() const;
 
 	};
