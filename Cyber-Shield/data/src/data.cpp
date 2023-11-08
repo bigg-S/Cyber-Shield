@@ -1,6 +1,5 @@
 #include "data.h"
 
-
 namespace DataCollection
 {
     // create log file to store network logs and data    
@@ -496,7 +495,11 @@ namespace DataCollection
                 struct IPv6Header* ip = (struct IPv6Header*)ipv6Header;
 
                 // Extract IPv6 header fields
-                // Extract required fields from the IPv6 header
+                packet.ipHeader.version = ip->version;
+                packet.ipHeader.protocol = ip->protocol;
+                packet.ipHeader.totalLength = ntohs(ip->payloadLength); // Convert from network byte order to host byte order
+                packet.ipHeader.ttl = ip->ttl;
+                packet.ipHeader.headerChecksum = ip->nextHeader;
 
                 // Convert IP addresses to string representations
                 char sourceIpString[INET6_ADDRSTRLEN];
@@ -526,7 +529,11 @@ namespace DataCollection
                 struct IPv6Header* ip = (struct IPv6Header*)ipv6Header;
 
                 // Extract IPv6 header fields
-                // Extract required fields from the IPv6 header
+                packet.ipHeader.version = ip->version;
+                packet.ipHeader.protocol = ip->protocol;
+                packet.ipHeader.totalLength = ntohs(ip->payloadLength); // Convert from network byte order to host byte order
+                packet.ipHeader.ttl = ip->ttl;
+                packet.ipHeader.headerChecksum = ip->nextHeader;
 
                  // Convert IP addresses to string representations
                 char sourceIpString[INET6_ADDRSTRLEN];
@@ -892,22 +899,10 @@ namespace DataCollection
     }
 
     // data container to store training and testing data
-    template <class Archive>
-    void Packet::serialize(Archive &ar, const unsigned int version)
-    {
-        ar& number;
-        ar& time;
-        ar& source;
-        ar& destination;
-        ar& protocol;
-        ar& length;
-        ar& ttl;
-        ar& info;
-    }
 
     Data::Data()
     {
-        featureVector = std::make_shared<std::vector<Packet>>();
+        featureVector = std::make_shared<std::vector<double>>();
     }
 
     Data::~Data()
@@ -924,17 +919,17 @@ namespace DataCollection
         ar& distance;
     }
 
-    void Data::SetFeatureVector(std::shared_ptr<std::vector<Packet>> vect)
+    void Data::SetFeatureVector(std::shared_ptr<std::vector<double>> vect)
     {
         featureVector = vect;
     }
 
-    void Data::AppendToFeatureVector(const Packet& val)
+    void Data::AppendToFeatureVector(const double& val)
     {
         featureVector->push_back(val);
     }
 
-    void Data::SetLabel(int val)  // Corrected the function name from SetLAbel to SetLabel
+    void Data::SetLabel(std::string val) 
     {
         label = val;
     }
@@ -949,7 +944,7 @@ namespace DataCollection
         return featureVector->size();
     }
 
-    int Data::GetLabel()
+    std::string Data::GetLabel()
     {
         return label;
     }
@@ -959,7 +954,7 @@ namespace DataCollection
         return enumLabel;
     }
 
-    std::shared_ptr<std::vector<Packet>> Data::GetFeatureVector()
+    std::shared_ptr<std::vector<double>> Data::GetFeatureVector()
     {
         return featureVector;
     }
@@ -974,12 +969,12 @@ namespace DataCollection
         return  distance;
     }
 
-
     // data handler
 
     // constructor
     DataHandler::DataHandler()
     {
+        // initialization of data array pointers
        dataArray = std::make_shared<std::vector<std::shared_ptr<Data>>>();
        trainingData = std::make_shared<std::vector<std::shared_ptr<Data>>>();
        testData = std::make_shared<std::vector<std::shared_ptr<Data>>>();
@@ -1026,18 +1021,27 @@ namespace DataCollection
             std::cerr << "Failed to open the CSV file: " << path << std::endl;
             return;
         }
-        
+
         std::string line;
         std::getline(file, line); // skip the header
 
         printf("Done getting input file header\n");
+
+        // Define maps to store label encodings for the categorical columns
+        std::unordered_map<std::string, int> protocolType;
+        std::unordered_map<std::string, int> service;
+        std::unordered_map<std::string, int> flag;
+
+        int protocolTypeCounter = 0;
+        int serviceCounter = 0;
+        int flagCounter = 0;
 
         while (std::getline(file, line))
         {
             std::istringstream ss(line);
             std::string token;
 
-            std::shared_ptr<Data> packet = std::make_shared<Data>();
+            std::shared_ptr<Data> data = std::make_shared<Data>();
             std::vector<std::string> fields; // store all the fields in avector
 
             while (std::getline(ss, token, ','))
@@ -1046,18 +1050,45 @@ namespace DataCollection
             }
 
             // parse the data point features
-            if (fields.size() == 8)
+            if (fields.size() == 42)
             {
-                packet->packet.number = std::stoi(fields[0].substr(1, fields[0].size() - 1));
-                packet->packet.time = std::stod(fields[1].substr(1, fields[0].size() - 1));
-                packet->packet.source = fields[2];
-                packet->packet.destination = fields[3];
-                packet->packet.protocol = fields[4];
-                packet->packet.length = std::stoi(fields[5].substr(1, fields[0].size() - 1));
-                packet->packet.ttl = (fields[6].substr(1, fields[0].size() - 1));
-                packet->packet.info = fields[7];
+                // Encode protocol type
+                if (protocolType.find(fields[1]) == protocolType.end())
+                {
+                    protocolType[fields[1]] = protocolTypeCounter++;
+                }
+                data->AppendToFeatureVector(protocolType[fields[1]]);
 
-                dataArray->push_back(packet);
+                // Encode service
+                if (service.find(fields[2]) == service.end())
+                {
+                    service[fields[2]] = serviceCounter++;
+                }
+                data->AppendToFeatureVector(service[fields[2]]);
+
+                // Encode flag
+                if (flag.find(fields[3]) == flag.end())
+                {
+                    flag[fields[3]] = flagCounter++;
+                }
+                data->AppendToFeatureVector(flag[fields[3]]);
+
+                // parse and convert each field to a double and append it to the feature vector
+                for (size_t i = 4; i < fields.size() - 1; i++)
+                {
+                    try
+                    {
+                        double value = std::stod(fields[i]);
+                        data->AppendToFeatureVector(value);
+                    }
+                    catch(const std::invalid_argument e)
+                    {
+                        std::cerr << "Invalid argument: " << e.what() << " for field: " << fields[i] << std::endl;
+                        continue;
+                    }
+                }
+
+                dataArray->push_back(data);
             }            
             
         }
@@ -1066,7 +1097,7 @@ namespace DataCollection
        
     }
 
-    void DataHandler::ReadFeatureLabel(std::string path)
+    void DataHandler::ReadFeatureLabels(std::string path)
     {
         std::ifstream file(path);
 
@@ -1096,15 +1127,15 @@ namespace DataCollection
                 fields.push_back(token);
             }
 
-            // Extract the label now
+            // Extract the label
             if (dataIndex < dataArray->size())
             {
                 // label is the last column in the csv file
-                int label = std::stoi(fields.back());
+                std::string label = fields.back();
 
                 // append label to corresponding data point
                 (*dataArray)[dataIndex]->SetLabel(label);
-                dataIndex;
+                dataIndex++;
             }
             else
             {
@@ -1121,16 +1152,14 @@ namespace DataCollection
     {
         std::random_device rd;
         std::default_random_engine engine(rd());
-        unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-        engine.seed(seed);
 
         // Shuffle the data randomly
         std::shuffle(dataArray->begin(), dataArray->end(), engine);
 
-        int dataSize = dataArray->size();
+        size_t dataSize = dataArray->size();
         int trainSize = static_cast<int>(dataSize * TRAIN_SET_PERCENT);
         int testSize = static_cast<int>(dataSize * TEST_SET_PERCENT);
-        int validateSize = dataSize - trainSize - testSize;
+        size_t validateSize = dataSize - trainSize - testSize;
 
         trainingData->clear();
         testData->clear();

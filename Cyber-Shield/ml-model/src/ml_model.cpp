@@ -60,61 +60,25 @@ namespace PacketAnalyzer
 		ia >> *this;
 	}
 
-	// for the packet structure
-	void KNN::SavePacket(const DataCollection::Packet& packet, const std::string& fileName)
-	{
-		std::ofstream ofs(fileName);
-		boost::archive::text_oarchive oa(ofs);
-		oa << packet;
-	}
-
-	DataCollection::Packet KNN::LoadPacket(const std::string& fileName)
-	{
-		DataCollection::Packet packet;
-		std::ifstream ifs(fileName);
-		boost::archive::text_iarchive ia(ifs);
-		ia >> packet;
-		return packet;
-	}
-
 	void KNN::FindKNearest(std::shared_ptr<DataCollection::Data> queryPoint)
 	{
 		neighbors = std::make_shared<std::vector<std::shared_ptr<DataCollection::Data>>>();
 		double min = std::numeric_limits<double>::max();
-		double prevMin = min;
-		int index = 0;
 
-		for (int i = 0; i < k; i++)
-		{
-			if (i == 0)
-			{
-				for (int j = 0; j < trainingData->size(); j++)
-				{
-					double distance = CalculateDistance(queryPoint, trainingData->at(j));
-					trainingData->at(j)->SetDistance(distance);
-					if (distance < min)
-					{
-						min = distance;
-						index = j;
-					}
-					neighbors->push_back(trainingData->at(index));
-					prevMin = min;
-					min = std::numeric_limits<double>::max();
+		for (int i = 0; i < k; i++) {
+			int index = -1;
+			for (int j = 0; j < trainingData->size(); j++) {
+				double distance = CalculateDistance(queryPoint, trainingData->at(j), DistanceMetric::EUCLID);
+				trainingData->at(j)->SetDistance(distance);
+
+				if (distance < min) {
+					min = distance;
+					index = j;
 				}
 			}
-			else
-			{
-				for (int j = 0; j < trainingData->size(); j++)
-				{
-					double distance = trainingData->at(j)->GetDistance();
-					if (distance > prevMin && distance < min)
-					{
-						min = distance;
-						index = j;
-					}
-				}
+
+			if (index != -1) {
 				neighbors->push_back(trainingData->at(index));
-				prevMin = min;
 				min = std::numeric_limits<double>::max();
 			}
 		}
@@ -140,9 +104,9 @@ namespace PacketAnalyzer
 		k = val;
 	}
 
-	int KNN::Predict() // return predicted class
+	std::string KNN::Predict() // return predicted class
 	{
-		std::map<uint8_t, int> classFreq;
+		std::map<std::string, int> classFreq;
 		for (int i = 0; i < neighbors->size(); i++)
 		{
 			if (classFreq.find(neighbors->at(i)->GetLabel()) == classFreq.end())
@@ -155,7 +119,7 @@ namespace PacketAnalyzer
 			}
 		}
 
-		int best = 0;
+		std::string best;
 		int max = 0;
 
 		for (auto kv : classFreq)
@@ -170,7 +134,7 @@ namespace PacketAnalyzer
 		return best;
 	}
 
-	double KNN::CalculateDistance(std::shared_ptr<DataCollection::Data> queryPoint, std::shared_ptr<DataCollection::Data> input)
+	double KNN::CalculateDistance(std::shared_ptr<DataCollection::Data> queryPoint, std::shared_ptr<DataCollection::Data> input, DistanceMetric metric)
 	{
 		double distance = 0.0;
 		if (queryPoint->GetFeatureVectorSize() != input->GetFeatureVectorSize())
@@ -179,27 +143,33 @@ namespace PacketAnalyzer
 			exit(1);
 		}
 
-		#ifdef EUCLID
-		for (unsigned i; i < queryPoint->GetFeatureVectorSize(); i++)
-		{
-			distance += pow(queryPoint->GetFeatureVector()->at(i) - input->GetFeatureVector()->at(i), 2);
-			std::cout << "Distance: " << distance;
-		}
-		distance = sqrt(distance);
-		return distance;
-		#elif defined MANHATTAN
-		// manhattan distance calculation
-		double manhattanDistance = 0.0;
 		for (unsigned i = 0; i < queryPoint->GetFeatureVectorSize(); i++)
 		{
-			manhattanDistance += abs(queryPoint->GetFeatureVector()->at(i) - input->GetFeatureVector()->at(i));
+			if (metric == DistanceMetric::EUCLID)
+			{
+				distance += pow(queryPoint->GetFeatureVector()->at(i) - input->GetFeatureVector()->at(i), 2);
+			}
+			else if(metric == DistanceMetric::MANHATTAN)
+			{
+				distance += abs(queryPoint->GetFeatureVector()->at(i) - input->GetFeatureVector()->at(i));
+			}
 		}
-		return manhattanDistance;
 
-		else
-			return -1.0
-		#endif
+		if (metric == DistanceMetric::EUCLID)
+		{
+			distance = sqrt(distance);
+		}
+		
+	}
 
+	const std::vector<std::string>& KNN::GetTrueLabels() const
+	{
+		return trueLabels;
+	}
+
+	const std::vector<std::string>& KNN::GetPredictedLabels() const
+	{
+		return predictedLabels;
 	}
 
 	double KNN::ValidatePerformance()
@@ -211,13 +181,13 @@ namespace PacketAnalyzer
 		for (std::shared_ptr<DataCollection::Data> queryPoint : *validationData)
 		{
 			FindKNearest(queryPoint);
-			int prediction = Predict();
+			std::string prediction = Predict();
 			if (prediction == queryPoint->GetLabel())
 			{
 				count++;
 			}
 			dataIndex++;
-			printf("Current Performance = %.3f %%\n", ((double)count * 100.0 / ((double)dataIndex)));
+			//printf("Current Performance = %.3f %%\n", ((double)count * 100.0 / ((double)dataIndex)));
 		}
 		currentPerformance = ((double)count * 100) / ((double)validationData->size());
 		printf("Validation performance for k = %d = %.3f %%\n", k, ((double)count * 100.0 / ((double)validationData->size())));
@@ -228,11 +198,18 @@ namespace PacketAnalyzer
 	{
 		double currentPerformance = 0.0;
 		int count = 0;
+		
+		// clear the lists to store the true predicted labels
+		trueLabels.clear();
+		predictedLabels.clear();
 
 		for (std::shared_ptr<DataCollection::Data> queryPoint: *testData)
 		{
 			FindKNearest(queryPoint);
-			int prediction = Predict();
+			std::string prediction = Predict();
+
+			trueLabels.push_back(queryPoint->GetLabel());
+			predictedLabels.push_back(prediction);
 			if (prediction == queryPoint->GetLabel())
 			{
 				count++;
@@ -241,6 +218,5 @@ namespace PacketAnalyzer
 		currentPerformance = ((double)count * 100) / ((double)testData->size());
 		printf("Test performance = %.3f %%\n", currentPerformance);
 		return currentPerformance;
-
 	}
 }

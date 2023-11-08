@@ -5,6 +5,12 @@
 
 namespace PacketAnalyzer
 {
+	enum class DistanceMetric
+	{
+		EUCLID,
+		MANHATTAN
+	};
+
 	class KNN
 	{
 		int k;
@@ -12,6 +18,9 @@ namespace PacketAnalyzer
 		std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> trainingData;
 		std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> testData;
 		std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> validationData;
+
+		std::vector<std::string> trueLabels;       // Store the true labels for test data
+		std::vector<std::string> predictedLabels;  // Store the predicted labels for test data
 
 	public:
 		KNN(int);
@@ -24,19 +33,20 @@ namespace PacketAnalyzer
 		void SaveKNN(std::string& fileName);
 		void LoadKNN(std::string& fileName);
 
-		void SavePacket(const DataCollection::Packet&, const std::string& fileName);
-		DataCollection::Packet LoadPacket(const std::string& fileName);
-
 		void FindKNearest(std::shared_ptr<DataCollection::Data> queryPoint);
 		void SetTrainingData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect);
 		void SetTestData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect);
 		void SetValidationData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect);
 		void SetK(int); // change k without reloading the data
 
-		int Predict(); // return predicted class
-		double CalculateDistance(std::shared_ptr<DataCollection::Data> queryPoint, std::shared_ptr<DataCollection::Data> input);
+		std::string Predict(); // return predicted class
+		double CalculateDistance(std::shared_ptr<DataCollection::Data> queryPoint, std::shared_ptr<DataCollection::Data> input, DistanceMetric metric);
 		double ValidatePerformance();
 		double TestPerformance();
+
+		const std::vector<std::string>& GetTrueLabels() const;
+
+		const std::vector<std::string>& GetPredictedLabels() const;
 
 	};
 }

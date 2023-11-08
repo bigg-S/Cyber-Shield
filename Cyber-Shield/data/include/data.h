@@ -11,9 +11,13 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <cstdint>
+#include <cmath>
 
+#include <memory>
 #include <mutex>
 #include <thread>
+
+#include <typeinfo>
 
 #include <condition_variable>
 #include <atomic>
@@ -31,7 +35,7 @@
 #include <vector>
 #include <iostream>
 #include <array>
-#include <map>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace DataCollection
@@ -66,6 +70,10 @@ namespace DataCollection
         uint16_t payloadLength;
         uint8_t nextHeader;
         uint8_t hopLimit;
+        uint16_t totalLength;
+        uint8_t protocol;
+        uint8_t ttl;
+        uint8_t tos;
         struct in6_addr sourceIp;
         struct in6_addr destinationIp;
     };
@@ -290,25 +298,11 @@ namespace DataCollection
         std::string CollectData();
     };
 
-    struct Packet
-    {
-        int number;
-        double time;
-        std::string source;
-        std::string destination;
-        std::string protocol;
-        int length;
-        std::string ttl;
-        std::string info;
-
-        template <class Archive>
-        void serialize(Archive& ar, const unsigned int);
-    };
-
+    // data preprocessing
     class Data
     {
-        std::shared_ptr<std::vector<Packet>> featureVector;
-        int label;
+        std::shared_ptr<std::vector<double>> featureVector; // no class at the end of the record
+        std::string label;
         int enumLabel;
         double distance;
 
@@ -316,21 +310,20 @@ namespace DataCollection
         Data();
         ~Data();
 
-        Packet packet;
-
         template<class Archive>
         void serialize(Archive& ar, const unsigned int);
-        void SetFeatureVector(std::shared_ptr<std::vector<Packet>>);
-        void AppendToFeatureVector(const Packet&); 
-        void SetLabel(int);
+
+        void SetFeatureVector(std::shared_ptr<std::vector<double>>);
+        void AppendToFeatureVector(const double&); 
+        void SetLabel(std::string);
         void SetEnumLabel(int);
 
         int GetFeatureVectorSize();
-        int GetLabel();
+        std::string GetLabel();
         int GetEnumLabel();
         double GetDistance();
 
-        std::shared_ptr<std::vector<Packet>> GetFeatureVector();
+        std::shared_ptr<std::vector<double>> GetFeatureVector();
 
         void SetDistance(double val);
     };
@@ -338,14 +331,14 @@ namespace DataCollection
     // Data handler (implements logic to read in, spil, count unique classes, pass aroud all kinds of data)
     class DataHandler
     {
-        std::shared_ptr<std::vector<std::shared_ptr<Data>>> dataArray;
+        std::shared_ptr<std::vector<std::shared_ptr<Data>>> dataArray; // all of the data pre-split
         std::shared_ptr<std::vector<std::shared_ptr<Data>>> trainingData;
         std::shared_ptr<std::vector<std::shared_ptr<Data>>> testData;
         std::shared_ptr<std::vector<std::shared_ptr<Data>>> validationData;
 
         int numClasses; // number of classes we have
         int featureVectorSize;
-        std::map<uint8_t, int> classMap;
+        std::map<std::string, int> classMap; // storing a class label to it's enumerated value 
 
         // in order to split data
         const double TRAIN_SET_PERCENT = 0.75;
@@ -363,7 +356,7 @@ namespace DataCollection
         void LoadDataHandler(std::string& fileName);
 
         void ReadFeatureVector(std::string path);
-        void ReadFeatureLabel(std::string path);
+        void ReadFeatureLabels(std::string path);
         void SplitData();
         void CountClasses();
 
