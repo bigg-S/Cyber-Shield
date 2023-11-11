@@ -256,326 +256,681 @@ namespace DataCollection
         }
     }
 
-    // Check if packet is IPv4
-    bool PacketCollector::IsIpv4Packet(const u_char* packetData, int linkType)
+    Datapoint PacketCollector::AttributeExtractor(const u_char* packetData, Packet packet, const struct pcap_pkthdr& header, const u_char* ipHeader, int connectionTime, int headerSize, uint8_t ipHeaderLength, uint16_t offset, uint16_t offset1)
     {
-        if (linkType == EthernetFrame)
+        Datapoint datapoint;
+        // store the connection in the connection table
+        Connection connection;
+
+        // Extract IP header fields
+        datapoint.duration = connectionTime;
+        datapoint.protocol_type = packet.protocol_type;
+
+        // determining the service
+        if (datapoint.protocol_type == "tcp")
         {
-            // Ethernet frame
-            const uint16_t ethType = (packetData[12] << 8) | packetData[13];
-            return ethType == 0x0800;  // IPv4 Ethernet frame
+            // Extract the destination port from the TCP header
+            uint16_t destPort = packet.destinationPort;
 
-        }
-        else if (linkType == WifiFrame)
-        {   // Wi-Fi frame (Assuming Wi-Fi data frames)
-            // parse the data frame to check if it's IPv4
-            // check the EtherType inside the data frame.
-            const uint16_t etherType = (packetData[30] << 8) | packetData[31]; // Assuming Ethernet II frame
-            return etherType == 0x0800;  // IPv4 EtherType
-
-        }
-        return false;
-    }
-
-    // Check if packet is IPv6
-    bool PacketCollector::IsIpv6Packet(const u_char* packetData, int linkType)
-    {
-        if (linkType == EthernetFrame)
-        {
-            // Ethernet frame
-            const uint16_t ethType = (packetData[12] << 8) | packetData[13];
-            return ethType == 0x86DD;  // IPv6 Ethernet frame
-
-        }
-        else if (linkType == WifiFrame)
-        {   // Wi-Fi frame (Assuming Wi-Fi data frames)
-            // parse the data frame to check if it's IPv6
-            // check the EtherType inside the data frame.
-            const uint16_t etherType = (packetData[30] << 8) | packetData[31]; // Assuming Ethernet II frame
-            return etherType == 0x86DD; // Wi-Fi data frame for IPv6
-
-        }
-        return false;
-    }
-
-
-    void PacketCollector::ProcessIpv4Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface)
-    {
-        NetworkPacket packet;
-        // Buffer to store the formatted timestamp
-        char timestampBuffer[26];
-        time_t timestamp = header.ts.tv_sec;
-
-        if (timestamp > 0)
-        {
-            // Ensure timestampBuffer is large enough to hold the formatted timestamp
-            if (ctime_s(timestampBuffer, sizeof(timestampBuffer), &timestamp) == 0)
+            // Determine the service based on the destination port
+            switch (destPort)
             {
-                packet.timestamp = timestampBuffer;
+            case 80:
+                datapoint.service = "http";
+                break;
+            case 443:
+                datapoint.service = "https";
+                break;
+            case 21:
+                datapoint.service = "ftp";
+                break;
+            case 25:
+                datapoint.service = "smtp";
+                break;
+            case 110:
+                datapoint.service = "pop3";
+                break;
+            case 23:
+                datapoint.service = "telnet";
+                break;
+            case 143:
+                datapoint.service = "imap4";
+                break;
+            case 22:
+                datapoint.service = "ssh";
+            default:
+                datapoint.service = "other";
             }
-            else
+        }
+        else if (datapoint.protocol_type == "udp")
+        {
+            // Extract the destination port from the UDP header
+            uint16_t destPort = packet.destinationPort;
+
+            // Determine the service based on the destination port
+            switch (destPort)
             {
-                // Handle the error from ctime_s
-                packet.timestamp = "Error formatting timestamp";
+            case 53:
+                datapoint.service = "dns";
+                break;
+            case 67:
+            case 68:
+                datapoint.service = "dhcp";
+                break;
+            case 123:
+                datapoint.service = "ntp";
+                break;
+            case 161:
+                datapoint.service = "snmp";
+                break;
+            case 137:
+                datapoint.service = "netbios";
+                break;
+            default:
+                datapoint.service = "other";
+            }
+        }
+        else if (datapoint.protocol_type == "icmp")
+        {
+            // ICMP doesn't have ports, so determining the service might be based on specific ICMP message types
+            const u_char* icmpHeader = packetData + headerSize + ipHeaderLength;
+
+            // Extract the ICMP type
+            uint8_t icmpType = icmpHeader[0];
+
+            // Determine the service based on the ICMP type
+            switch (icmpType)
+            {
+            case 1:
+                datapoint.service = "ecr_i";
+                break;
+            default:
+                datapoint.service = "other";
             }
         }
         else
         {
-            // Handle the case where timestamp is not a valid time_t value
-            packet.timestamp = "Invalid timestamp value";
+            datapoint.service = "other";
         }
 
-        char errbuf[PCAP_ERRBUF_SIZE];
-
-        // Open the interface with pcap to get its properties
-        pcap_t* handle = pcap_open_live(iface.interfaceName.c_str(), 100, 1, 1000, errbuf);
-        std::string interfaceId = iface.interfaceName;
-
-        if (handle != nullptr)
+        // Flags
+        if (datapoint.protocol_type == "tcp")
         {
-            // Get the data link type of the interface
-            int linkType = pcap_datalink(handle);
+            const u_char* tcpHeader = ipHeader + headerSize + ipHeaderLength; // Offset for the start of the TCP header
+            uint16_t tcpFlags = ntohs(*reinterpret_cast<const uint16_t*>(tcpHeader + 12)); // Offset for TCP flags (12 bytes into the header)
 
-            // Check the interface name for common Ethernet prefixes
-            if (linkType == EthernetFrame || strstr(iface.interfaceDescription.c_str(), "Ethernet") || strstr(iface.interfaceName.c_str(), "vEthernet"))
+            // Check the TCP flags to determine the active flag
+            if (tcpFlags & 0x01)
             {
-                // It's likely an Ethernet interface
-                std::string interfaceId = iface.interfaceName;
-
-                const u_char* ethHeader = packetData;
-                uint16_t etherType = ntohs(*reinterpret_cast<const uint16_t*>(ethHeader + 12)); // Extract the Ethernet frame type                
-
-                const u_char* ipHeader = packetData + EthernetHeaderSize; // Skip Ethernet header
-                struct Ipv4Header* ip = (struct Ipv4Header*)ipHeader;
-
-                // Extract IP header fields
-                packet.ipHeader.version = (ip->version >> 4) & 0x0F;
-                packet.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
-                packet.ipHeader.tos = ip->tos;
-                packet.ipHeader.totalLength = ntohs(ip->totalLength);
-                packet.ipHeader.identification = ntohs(ip->identification);
-                packet.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
-                packet.ipHeader.ttl = ip->ttl;
-                packet.ipHeader.protocol = ip->protocol;
-                packet.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
-
-                // Convert IP addresses to string representations
-                char sourceIpString[INET_ADDRSTRLEN];
-                char destinationIpString[INET_ADDRSTRLEN];
-
-                inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
-                inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
-
-                packet.ipHeader.sourceIp = sourceIpString;
-                packet.ipHeader.destinationIp = destinationIpString;
-
-                // Assuming payload follows the IP header
-                const u_char* payload = packetData + EthernetHeaderSize + (ip->headerLength * 4); // Skip Ethernet + IP header
-
-                // Calculate the payload length
-                uint16_t payloadLength = header.caplen - EthernetHeaderSize - (ip->headerLength * 4); // Skip Ethernet + IP header
-
-                // Copy payload data to the NetworkPacket
-                packet.applicationData.assign(payload, payload + payloadLength);
-
-                pcap_close(handle);
-
+                datapoint.flag = "FIN";
             }
-            else if (linkType == WifiFrame || strstr(iface.interfaceDescription.c_str(), "Wi-Fi") || strstr(iface.interfaceName.c_str(), "Wifi"))
+            else if (tcpFlags & 0x02)
             {
-                // It's likely a Wi-Fi interface                
-                const u_char* wifiHeader = packetData;
-
-                // Extract the frame control field (2 bytes)
-                uint16_t frameControl = wifiHeader[0] | (wifiHeader[1] << 8);
-
-                const u_char* ipHeader = packetData + WiFiHeaderSize; // Skip Wi-Fi header
-                struct Ipv4Header* ip = (struct Ipv4Header*)ipHeader;
-
-                // Extract IP header fields
-                packet.ipHeader.version = (ip->version >> 4) & 0x0F;
-                packet.ipHeader.headerLength = (ip->headerLength & 0x0F) * 4;
-                packet.ipHeader.tos = ip->tos;
-                packet.ipHeader.totalLength = ntohs(ip->totalLength);
-                packet.ipHeader.identification = ntohs(ip->identification);
-                packet.ipHeader.flagsFragmentOffset = ntohs(ip->flagsFragmentOffset);
-                packet.ipHeader.ttl = ip->ttl;
-                packet.ipHeader.protocol = ip->protocol;
-                packet.ipHeader.headerChecksum = ntohs(ip->headerChecksum);
-
-                // Convert IP addresses to string representations
-                char sourceIpString[INET_ADDRSTRLEN];
-                char destinationIpString[INET_ADDRSTRLEN];
-
-                inet_ntop(AF_INET, &(ip->sourceIp), sourceIpString, INET_ADDRSTRLEN);
-                inet_ntop(AF_INET, &(ip->destinationIp), destinationIpString, INET_ADDRSTRLEN);
-
-                packet.ipHeader.sourceIp = sourceIpString;
-                packet.ipHeader.destinationIp = destinationIpString;
-
-                // Assuming payload follows the IP header
-                const u_char* payload = packetData + IPv4HeaderSize; // Skip Wi-Fi + IP header (assuming IP header is 20 bytes)
-
-                // Calculate the payload length
-                uint16_t payloadLength = header.caplen - WiFiHeaderSize - IPv4HeaderSize; // Skip Wi-Fi header and IP header
-
-                // Copy payload data to the NetworkPacket
-                packet.applicationData.assign(payload, payload + payloadLength);
-
-                pcap_close(handle);
-
+                datapoint.flag = "SYN";
+            }
+            else if (tcpFlags & 0x04)
+            {
+                datapoint.flag = "RST";
+            }
+            else if (tcpFlags & 0x08)
+            {
+                datapoint.flag = "PUSH";
+            }
+            else if (tcpFlags & 0x10)
+            {
+                datapoint.flag = "ACK";
+            }
+            else if (tcpFlags & 0x20)
+            {
+                datapoint.flag = "URG";
+            }
+            else if (tcpFlags & 0x40)
+            {
+                datapoint.flag = "ECE";
+            }
+            else if (tcpFlags & 0x80)
+            {
+                datapoint.flag = "CWR";
             }
             else
             {
-                //logger.Log("Unknown interface");
-                std::cerr << "Unknow interface" << std::endl;
+                datapoint.flag = "other"; // If no active flag is set
             }
 
-            // Store the packet details in the shared vector
-            std::lock_guard<std::mutex> lock(capturedPacketsMutex);
-
-            if (capturedPackets.find(interfaceId) == capturedPackets.end())
+            // Additional logic for specific flags
+            if (tcpFlags & 0x04 && tcpFlags & 0x10)
             {
-                // If the interface doesn't exist in the map, create it
-                capturedPackets[interfaceId] = std::vector<NetworkPacket>();
+                datapoint.flag = "RSTO"; // Reset connection because of RST and ACK flags
+                connection.flags = "RSTO";
+            }
+            else if (tcpFlags & 0x04 && !(tcpFlags & 0x10))
+            {
+                datapoint.flag = "RSTR"; // Reset connection without ACK flag
+                connection.flags = "RSTR";
+            }
+            else if (tcpFlags & 0x08 && !(tcpFlags & 0x02))
+            {
+                datapoint.flag = "REJ"; // Reject connection without SYN flag
+                connection.flags = "REJ";
+            }
+            else if (tcpFlags & 0x02 && tcpFlags & 0x10)
+            {
+                datapoint.flag = "SF"; // Successful connection because of SYN and ACK flags
+                connection.flags = "SF";
+            }
+            else if (tcpFlags & 0x02 && !(tcpFlags & 0x10))
+            {
+                datapoint.flag = "SO"; // Open connection without ACK flag
+                connection.flags = "SO";
             }
 
-            capturedPacketsArr.push_back(packet);
         }
-        else
+        else if (datapoint.protocol_type == "udp")
         {
-            logger.Log("An error occurred!");
-            std::cerr << "An error occurred!";
+            datapoint.flag = "N/A"; // no flags in UDP
         }
-
-    }
-
-    void PacketCollector::ProcessIpv6Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface)
-    {
-        NetworkPacket packet;
-        // Buffer to store the formatted timestamp
-        char timestampBuffer[26];
-        time_t timestamp = header.ts.tv_sec;
-
-        if (timestamp > 0)
+        else if (datapoint.protocol_type == "icmp")
         {
-            // Ensure timestampBuffer is large enough to hold the formatted timestamp
-            if (ctime_s(timestampBuffer, sizeof(timestampBuffer), &timestamp) == 0)
-            {
-                packet.timestamp = timestampBuffer;
-            }
-            else
-            {
-                // Handle the error from ctime_s
-                packet.timestamp = "Error formatting timestamp";
+            const u_char* icmpHeader = ipHeader + ipHeaderLength; // Offset for the start of the ICMP header
+            uint8_t icmpType = icmpHeader[0];
+
+            // Check the ICMP type to determine the active flag
+            switch (icmpType) {
+            case 0:
+                datapoint.flag = "Echo Reply";
+                connection.flags = "Echo Reply";
+                break;
+            case 3:
+                datapoint.flag = "Destination Unreachable";
+                connection.flags = "Destination Unreachable";
+                break;
+            case 8:
+                datapoint.flag = "Echo Request";
+                connection.flags = "Echo Request";
+                break;
+            default:
+                datapoint.flag = "other";
+                connection.flags = "other";
             }
         }
         else
         {
-            // Handle the case where timestamp is not a valid time_t value
-            packet.timestamp = "Invalid timestamp value";
+            datapoint.flag = "other"; // Handle other transport layer protocols
+            connection.flags = "other";
         }
 
-        char errbuf[PCAP_ERRBUF_SIZE];
+        connection.sourceIP = packet.sourceIp;
+        connection.destIP = packet.destIp;
 
-        // Open the interface with pcap to get its properties
-        pcap_t* handle = pcap_open_live(iface.interfaceName.c_str(), 100, 1, 1000, errbuf);
-        std::string interfaceId = iface.interfaceName;
+        connection.sourcePort = packet.sourcePort;
+        connection.destPort = packet.destinationPort;
 
-        if (handle != nullptr)
+        datapoint.src_bytes = ntohs(*reinterpret_cast<const uint16_t*>(ipHeader + offset));
+        datapoint.dst_bytes = ntohs(*reinterpret_cast<const uint16_t*>(ipHeader + offset1));
+        datapoint.land = (packet.sourceIp == packet.destIp && packet.sourcePort == packet.destinationPort) ? 1 : 0;
+
+        // extracting wrong fragments 
+        if (datapoint.protocol_type == "tcp")
         {
-            // Get the data link type of the interface
-            int linkType = pcap_datalink(handle);
+            const u_char* tcpHeader = packetData + headerSize + ipHeaderLength;
 
-            // Check the interface name for common Ethernet prefixes
-            if (linkType == EthernetFrame || strstr(iface.interfaceDescription.c_str(), "Ethernet") || strstr(iface.interfaceName.c_str(), "vEthernet"))
-            {
-                // It's likely an Ethernet interface
-                const u_char* ipv6Header = packetData + EthernetHeaderSize; // Skip Ethernet header
-                struct IPv6Header* ip = (struct IPv6Header*)ipv6Header;
+            // Extract the TCP flags field (byte 13 of the TCP header)
+            uint8_t tcpFlags = tcpHeader[13];
 
-                // Extract IPv6 header fields
-                packet.ipHeader.version = ip->version;
-                packet.ipHeader.protocol = ip->protocol;
-                packet.ipHeader.totalLength = ntohs(ip->payloadLength); // Convert from network byte order to host byte order
-                packet.ipHeader.ttl = ip->ttl;
-                packet.ipHeader.headerChecksum = ip->nextHeader;
+            // Check if the URG (urgent) and DF (don't fragment) flags are set
+            bool urgentFlagSet = (tcpFlags & 0x20) != 0;
+            bool dfFlagSet = (tcpFlags & 0x40) != 0;
 
-                // Convert IP addresses to string representations
-                char sourceIpString[INET6_ADDRSTRLEN];
-                char destinationIpString[INET6_ADDRSTRLEN];
+            // Count the number of wrong fragments based on the DF flag
+            int wrongFragmentCount = dfFlagSet ? 1 : 0;
 
-                inet_ntop(AF_INET6, &(ip->sourceIp), sourceIpString, INET6_ADDRSTRLEN);
-                inet_ntop(AF_INET6, &(ip->destinationIp), destinationIpString, INET6_ADDRSTRLEN);
+            // Count the number of urgent packets based on the URG flag
+            int urgentPacketCount = urgentFlagSet ? 1 : 0;
 
-                packet.ipHeader.sourceIp = sourceIpString;
-                packet.ipHeader.destinationIp = destinationIpString;
+            datapoint.wrong_fragment = wrongFragmentCount;
+            datapoint.urgent = urgentPacketCount;
+        }
+        else if (datapoint.protocol_type == "udp")
+        {
+            // Extract the source and destination ports from the UDP header
+            uint16_t sourcePort = packet.sourcePort;
+            uint16_t destinationPort = packet.destinationPort;
 
-                // Assuming payload follows the IPv6 header
-                const u_char* payload = packetData + EthernetHeaderSize + IPv6HeaderSize; // Skip Ethernet + IPv6 header
+            //conditions for "Wrong_fragment" and "Urgent" in UDP
+            bool wrongFragmentCondition = (sourcePort == 12345 && destinationPort == 54321);
+            bool urgentCondition = (sourcePort == 54321 && destinationPort == 12345);
 
-                // Calculate the payload length
-                uint16_t payloadLength = header.caplen - EthernetHeaderSize - IPv6HeaderSize; // Skip Ethernet + IPv6 header
+            // Count the number of wrong fragments and urgent packets based on the conditions
+            int wrongFragmentCount = wrongFragmentCondition ? 1 : 0;
+            int urgentPacketCount = urgentCondition ? 1 : 0;
 
-                // Copy payload data to the NetworkPacket
-                packet.applicationData.assign(payload, payload + payloadLength);
+            datapoint.wrong_fragment = wrongFragmentCount;
+            datapoint.urgent = urgentPacketCount;
+        }
+        else if (datapoint.protocol_type == "icmp")
+        {
+            const u_char* icmpHeader = packetData + headerSize + ipHeaderLength;
 
-            }
-            else if (linkType == WifiFrame || strstr(iface.interfaceDescription.c_str(), "Wi-Fi") || strstr(iface.interfaceName.c_str(), "Wifi"))
-            {
+            // Extract the ICMP type and code
+            uint8_t icmpType = icmpHeader[0];
+            uint8_t icmpCode = icmpHeader[1];
 
-                // It's likely a Wi-Fi interface                
-                const u_char* ipv6Header = packetData + WiFiHeaderSize; // Skip Wi-Fi header
-                struct IPv6Header* ip = (struct IPv6Header*)ipv6Header;
+            // Example conditions for ICMP (adjust as needed)
+            bool wrongFragmentCondition = (icmpType == 3 && icmpCode == 4); // Example: ICMP Destination Unreachable, Fragmentation Needed
+            bool urgentCondition = (icmpType == 8 && icmpCode == 0); // Example: ICMP Echo Request (Ping)
 
-                // Extract IPv6 header fields
-                packet.ipHeader.version = ip->version;
-                packet.ipHeader.protocol = ip->protocol;
-                packet.ipHeader.totalLength = ntohs(ip->payloadLength); // Convert from network byte order to host byte order
-                packet.ipHeader.ttl = ip->ttl;
-                packet.ipHeader.headerChecksum = ip->nextHeader;
+            // Count the number of packets meeting the conditions
+            int wrongFragmentCount = wrongFragmentCondition ? 1 : 0;
+            int urgentPacketCount = urgentCondition ? 1 : 0;
 
-                 // Convert IP addresses to string representations
-                char sourceIpString[INET6_ADDRSTRLEN];
-                char destinationIpString[INET6_ADDRSTRLEN];
-
-                inet_ntop(AF_INET6, &(ip->sourceIp), sourceIpString, INET6_ADDRSTRLEN);
-                inet_ntop(AF_INET6, &(ip->destinationIp), destinationIpString, INET6_ADDRSTRLEN);
-
-                packet.ipHeader.sourceIp = sourceIpString;
-                packet.ipHeader.destinationIp = destinationIpString;
-
-                // Assuming payload follows the IPv6 header
-                const u_char* payload = packetData + WiFiHeaderSize + IPv6HeaderSize; // Skip Wi-Fi + IPv6 header
-
-                // Calculate the payload length
-                uint16_t payloadLength = header.caplen - WiFiHeaderSize - IPv6HeaderSize; // Skip Wi-Fi header and IPv6 header
-
-                // Copy payload data to the NetworkPacket
-                packet.applicationData.assign(payload, payload + payloadLength);
-
-            }
-            else
-            {
-                //logger.Log("Unknown interface");
-                std::cerr << "Unknow interface" << std::endl;
-            }
-            // Store the packet details in the shared vector
-            std::lock_guard<std::mutex> lock(capturedPacketsMutex);
-
-            if (capturedPackets.find(interfaceId) == capturedPackets.end())
-            {
-                // If the interface doesn't exist in the map, create it
-                capturedPackets[interfaceId] = std::vector<NetworkPacket>();
-            }
-
-            capturedPacketsArr.push_back(packet);
+            datapoint.wrong_fragment = wrongFragmentCount;
+            datapoint.urgent = urgentPacketCount;
         }
         else
         {
-            logger.Log("An error occurred!");
-            std::cerr << "An error occurred!";
+            std::cerr << "Unknown fragment or urgent flag";
         }
+
+        // Assuming payload follows the IP header
+        const u_char* payload = packet.payload;
+
+        // Calculate the payload length
+        uint16_t payloadLength = header.caplen - headerSize - ipHeaderLength; // Skip Ethernet + IP header
+
+        // hot attribute
+        std::string payloadString(reinterpret_cast<const char*>(payload, payloadLength));
+
+        if (payloadString.find("ENTER_SYSTEM_DIRECTORY") != std::string::npos)
+        {
+            datapoint.hot = 1;
+        }
+        else
+        {
+            datapoint.hot = 0;
+        }
+
+        //ssh and telnet stats
+        if (datapoint.service == "ssh" || datapoint.service == "telnet" || datapoint.service == "ftp")
+        {
+            // Check for failed login attempts
+            if (payloadString.find("Failed password") != std::string::npos)
+            {
+                datapoint.num_failed_logins++;
+            }
+
+            // Check for successful login
+            if (payloadString.find("Accepted password") != std::string::npos)
+            {
+                datapoint.logged_in = 1;
+            }
+
+            // Check for compromised conditions (example: detecting suspicious commands)
+            if (payloadString.find("rm -rf /") != std::string::npos)
+            {
+                datapoint.num_compromised++;
+            }
+
+            // Check for root shell
+            if (payloadString.find("root shell") != std::string::npos)
+            {
+                datapoint.root_shell = 1;
+            }
+
+            // Check for su command attempts
+            if (payloadString.find("su ") != std::string::npos)
+            {
+                datapoint.su_attempted = 1;
+            }
+
+            // Check for root accesses
+            if (payloadString.find("root access") != std::string::npos)
+            {
+                datapoint.num_root++;
+            }
+
+            // Check for file creations
+            if (payloadString.find("STOR ") != std::string::npos)
+            {
+                datapoint.num_file_creations++;
+            }
+
+            // Check for shell prompts
+            if (payloadString.find("sh") != std::string::npos)
+            {
+                datapoint.num_shells++;
+            }
+
+            // Check for operations on access control files
+            if (payloadString.find("chmod") != std::string::npos || payloadString.find("chown") != std::string::npos)
+            {
+                datapoint.num_access_files++;
+            }
+
+            // Check for outbound commands in an FTP session
+            if (payloadString.find("PORT") != std::string::npos || payloadString.find("PASV") != std::string::npos)
+            {
+                datapoint.num_outbound_cmds++;
+            }
+
+            // Check for hot login (example: detecting root or admin logins)
+            if (payloadString.find("root") != std::string::npos || payloadString.find("admin") != std::string::npos)
+            {
+                datapoint.is_host_login = 1;
+            }
+
+            // Check for guest login
+            if (payloadString.find("guest") != std::string::npos)
+            {
+                datapoint.is_guest_login = 1;
+            }
+        }
+
+        // Increment count for each connection to the same destination host
+        int totalDstHostConnections = 0;
+
+        // Total connections to the same service (port number)
+        int totalSrvConnections = 0;
+
+        // Total connections in the connectionstable
+        int totalConnections = 0;
+
+        // Total connections to different destination hosts
+        int totalDifferentHostConnections = 0;
+
+        // Connections that have activated the flags
+        int totalConnectionsActiveFlag = 0;
+
+        int srvSerrorCount = 0;
+        int rerrorCount = 0;
+        int srvRerrorCount = 0;
+
+        int dstHostDiffSrvCount = 0;
+        int dstHostSameSrcPortCount = 0;
+        int dstHostSrvDiffHostCount = 0;
+        int dstHostSerrorCount = 0;
+        int dstHostSrvSerrorCount = 0;
+        int dstHostRerrorCount = 0;
+        int dstHostSrvRerrorCount = 0;
+
+        int totalDstHostCount = 0;
+        int totalDstHostSrvCount = 0;
+
+        // Iterate through the connectionTable vector
+        for (const auto& connection : connectionsTable)
+        {
+            // Increment totalConnections
+            totalConnections++;
+
+            // Check if the denominator is not zero before division
+            if (totalDstHostConnections != 0)
+            {
+                // Calculate Srv_count: The ratio of connections having the same destination host and port to total connections
+                datapoint.srv_count = totalConnectionsActiveFlag / totalDstHostConnections;
+            }
+            else
+            {
+                // Handle division by zero error
+                datapoint.srv_count = 0.0;
+            }
+
+            if (totalConnections != 0)
+            {
+                // Calculate Same_srv_rate: The percentage of connections that were to the same service
+                datapoint.same_srv_rate = (totalSrvConnections / static_cast<double>(totalConnections));
+
+                // Calculate Diff_srv_rate: The percentage of connections that were to different services
+                datapoint.diff_srv_rate = ((totalConnections - totalSrvConnections) / static_cast<double>(totalConnections));
+
+                // Calculate Srv_diffhost rate: The percentage of connections that were to different destination machines
+                datapoint.srv_diff_host_rate = (totalDifferentHostConnections / static_cast<double>(totalSrvConnections));
+
+                // Calculate Dst_host_same srv_rate: The percentage of connections that were to the same service
+                if (datapoint.dst_host_count != 0)
+                {
+                    datapoint.dst_host_same_srv_rate = (datapoint.dst_host_srv_count / static_cast<double>(datapoint.dst_host_count));
+                }
+                else
+                {
+                    // Handle division by zero error
+                    datapoint.dst_host_same_srv_rate = 0.0;
+                }
+            }
+            else
+            {
+                // Handle division by zero error
+                datapoint.same_srv_rate = 0.0;
+                datapoint.diff_srv_rate = 0.0;
+                datapoint.srv_diff_host_rate = 0.0;
+                datapoint.dst_host_same_srv_rate = 0.0;
+            }
+
+            // Check if the destination host is the same
+            if (connection.destIP == packet.destIp)
+            {
+                totalDstHostConnections++;
+
+                // Calculate Dst_host_diff_srv_rate
+                if (connection.destPort == packet.destinationPort && connection.sourcePort != packet.sourcePort)
+                {
+                    dstHostDiffSrvCount++;
+                }
+
+                // Calculate Dst_host_same_src_port_rate
+                if (connection.destPort == packet.destinationPort && connection.sourcePort == packet.sourcePort)
+                {
+                    dstHostSameSrcPortCount++;
+                }
+
+                // Calculate Dst_host_srv_diff_host_rate
+                if (connection.destPort == packet.destinationPort && connection.destIP != packet.destIp)
+                {
+                    dstHostSrvDiffHostCount++;
+                }
+
+                // Calculate Dst_host_serror_rate
+                if (connection.destPort == packet.destinationPort && !connection.flags.empty() && (connection.flags == "SF" || connection.flags == "REJ"))
+                {
+                    dstHostSerrorCount++;
+                }
+
+                // Calculate Dst_host_srv_serror_rate
+                if (connection.destPort == packet.destinationPort && !connection.flags.empty() && (connection.flags == "SF" || connection.flags == "REJ"))
+                {
+                    dstHostSrvSerrorCount++;
+                }
+
+                // Calculate Dst_host_rerror_rate
+                if (connection.destPort == packet.destinationPort && !connection.flags.empty() && connection.flags == "REJ")
+                {
+                    dstHostRerrorCount++;
+                }
+
+                // Calculate Dst_host_srv_rerror_rate
+                if (connection.destPort == packet.destinationPort && !connection.flags.empty() && connection.flags == "REJ")
+                {
+                    dstHostSrvRerrorCount++;
+                }
+
+                // Update totalDstHostConnections
+                totalDstHostConnections++;
+
+                if (connection.destPort == packet.destinationPort)
+                {
+                    // Your existing logic for counting srv connections, etc.
+
+                    // Update totalDstHostCount
+                    totalDstHostCount++;
+
+                    if (connection.sourcePort == packet.destinationPort)
+                    {
+                        // Update totalDstHostSrvCount
+                        totalDstHostSrvCount++;
+                    }
+                }
+            }
+
+            // Check if the service (port number) is the same
+            if (connection.destPort == packet.destinationPort)
+            {
+                totalSrvConnections++;
+
+                // Check if the connection has activated flags
+                if (!connection.flags.empty())
+                {
+                    totalConnectionsActiveFlag++;
+                }
+
+                // Check if the connection has activated flags and match the specified conditions
+                if (connection.flags == "SF" || connection.flags == "SO")
+                {
+                    srvSerrorCount++;
+                }
+
+                // Check if the connection has activated flags and match the specified conditions
+                if (connection.sourceIP == packet.sourceIp && connection.sourcePort == packet.sourcePort && connection.flags == "REJ")
+                {
+                    rerrorCount++;
+                }
+
+                // Check if the connection has activated flags and match the specified conditions
+                if (connection.flags == "REJ")
+                {
+                    srvRerrorCount++;
+                }
+            }
+        }
+
+        // Check if the denominator is not zero before division
+        if (totalDstHostConnections != 0)
+        {
+            // Update packet attributes
+            datapoint.dst_host_diff_srv_rate = (static_cast<double>(dstHostDiffSrvCount) / totalDstHostConnections);
+            datapoint.dst_host_same_src_port_rate = (static_cast<double>(dstHostSameSrcPortCount) / totalDstHostSrvCount);
+            datapoint.dst_host_srv_diff_host_rate = (static_cast<double>(dstHostSrvDiffHostCount) / totalDstHostSrvCount);
+            datapoint.dst_host_serror_rate = (static_cast<double>(dstHostSerrorCount) / totalDstHostCount);
+            datapoint.dst_host_srv_serror_rate = (static_cast<double>(dstHostSrvSerrorCount) / totalDstHostSrvCount);
+            datapoint.dst_host_rerror_rate = (static_cast<double>(dstHostRerrorCount) / totalDstHostCount);
+            datapoint.dst_host_srv_rerror_rate = (static_cast<double>(dstHostSrvRerrorCount) / totalDstHostSrvCount);
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.dst_host_diff_srv_rate = 0.0;
+            datapoint.dst_host_same_src_port_rate = 0.0;
+            datapoint.dst_host_srv_diff_host_rate = 0.0;
+            datapoint.dst_host_serror_rate = 0.0;
+            datapoint.dst_host_srv_serror_rate = 0.0;
+            datapoint.dst_host_rerror_rate = 0.0;
+            datapoint.dst_host_srv_rerror_rate = 0.0;
+        }
+
+        // Update packet attributes
+        datapoint.count = totalDstHostConnections;
+
+        // Increment srv_count for each connection to the same service
+        datapoint.srv_count = totalSrvConnections;
+
+        // Calculate Srv_count: The ratio of connections having the same destination host and port to total connections
+        if (totalDstHostConnections != 0)
+        {
+            datapoint.srv_count = totalConnectionsActiveFlag / totalDstHostConnections;
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.srv_count = 0.0;
+        }
+
+        // Calculate Same_srv_rate: The percentage of connections that were to the same service
+        if (totalConnections != 0)
+        {
+            datapoint.same_srv_rate = (totalSrvConnections / static_cast<double>(totalConnections));
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.same_srv_rate = 0.0;
+        }
+
+        // Calculate Diff_srv_rate: The percentage of connections that were to different services
+        if (totalConnections != 0)
+        {
+            datapoint.diff_srv_rate = ((totalConnections - totalSrvConnections) / static_cast<double>(totalConnections));
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.diff_srv_rate = 0.0;
+        }
+
+        // Calculate Srv_diffhost rate: The percentage of connections that were to different destination machines
+        if (totalSrvConnections != 0)
+        {
+            datapoint.srv_diff_host_rate = (totalDifferentHostConnections / static_cast<double>(totalSrvConnections));
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.srv_diff_host_rate = 0.0;
+        }
+
+        // Calculate Dst_host_count: Number of connections having the same destination host IP address
+        datapoint.dst_host_count = totalDstHostConnections;
+
+        // Calculate Dst_hostsrv count: Number of connections having the same port number
+        datapoint.dst_host_srv_count = totalSrvConnections;
+
+        // Calculate Dst_host_same srv_rate: The percentage of connections that were to the same service
+        if (datapoint.dst_host_count != 0)
+        {
+            datapoint.dst_host_same_srv_rate = (datapoint.dst_host_srv_count / static_cast<double>(datapoint.dst_host_count));
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.dst_host_same_srv_rate = 0.0;
+        }
+
+        // Calculate Srv_serror_rate: The percentage of connections that have activated the flag s0, s1, s2, or s3, among the connections aggregated in srv_count
+        // (Assuming s0, s1, s2, s3 are flags indicating errors in the network traffic)
+        if (totalSrvConnections != 0)
+        {
+            datapoint.srv_serror_rate = srvSerrorCount / static_cast<double>(totalSrvConnections);
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.srv_serror_rate = 0.0;
+        }
+
+        // Calculate Rerror_rate: The percentage of connections that have activated the flag REJ, among the connections aggregated in count
+        // (Assuming REJ is a flag indicating rejection in the network traffic)
+        if (totalConnections != 0)
+        {
+            datapoint.rerror_rate = rerrorCount / static_cast<double>(totalConnections);
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.rerror_rate = 0.0;
+        }
+
+        // Calculate Srv_rerror_rate: The percentage of connections that have activated the flag REJ, among the connections aggregated in srv_count
+        // (Assuming REJ is a flag indicating rejection in the network traffic)
+        if (totalSrvConnections != 0)
+        {
+            datapoint.srv_rerror_rate = srvRerrorCount / static_cast<double>(totalSrvConnections);
+        }
+        else
+        {
+            // Handle division by zero error
+            datapoint.srv_rerror_rate = 0.0;
+        }
+
+        std::lock_guard<std::mutex> lock(connTable);
+        connectionsTable.push_back(connection);
+
+        return datapoint;
     }
 
     // signal handler
@@ -647,15 +1002,18 @@ namespace DataCollection
             startBarrier.fetch_sub(1, std::memory_order_relaxed); // Release the thread from the barrier
             return;
         }
-
+        
         while (isCapturing.load(std::memory_order_relaxed))
         {
+            // Capture start time
+            std::chrono::system_clock::time_point captureStartTime = std::chrono::system_clock::now();
+
             struct pcap_pkthdr header;
             const u_char* packetData = pcap_next(pcapHandle, &header);
 
             if (packetData != nullptr)
             {
-                ProcessPacket(packetData, header, iface);
+                ProcessPacket(packetData, header, iface, captureStartTime);
             }
         }
 
@@ -671,27 +1029,454 @@ namespace DataCollection
         }
     }
 
+    // converting bytes to uint32_t
+    uint32_t PacketCollector::bytesToUint32(const uint8_t* bytes) 
+    {
+        return (static_cast<uint32_t>(bytes[0]) << 24) |
+            (static_cast<uint32_t>(bytes[1]) << 16) |
+            (static_cast<uint32_t>(bytes[2]) << 8) |
+            static_cast<uint32_t>(bytes[3]);
+    }
+
     // Process the packet collected
-    void PacketCollector::ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface)
+    void PacketCollector::ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface, std::chrono::system_clock::time_point captureStartTime)
     {
         char errbuf[PCAP_ERRBUF_SIZE];
         pcap_t* handle = pcap_open_live(iface.interfaceName.c_str(), BUFSIZ, 1, 1000, errbuf);
 
-        int linkType = pcap_datalink(handle);
+        int linkType = pcap_datalink(handle);  // determine the link layer protocol
 
-        if (IsIpv4Packet(packetData, linkType))
+        // get the timestamp from when the packet was captured
+        std::chrono::system_clock::time_point timestamp = std::chrono::system_clock::from_time_t(header.ts.tv_sec);
+        timestamp += std::chrono::microseconds(header.ts.tv_sec);
+
+        // calculate the connection time
+        std::chrono::duration<double> connectionTime = timestamp - captureStartTime;
+
+        // convert connection time to seconds
+        int connectionTimeInSeconds = connectionTime.count();
+
+        Packet packet;
+
+        // Buffer to store the formatted timestamp
+        char timestampBuffer[26];
+        time_t timestamp1 = header.ts.tv_sec;
+
+        if (timestamp1 > 0)
         {
-            ProcessIpv4Packet(packetData, header, iface);
-        }
-        else if (IsIpv6Packet(packetData, linkType))
-        {
-            ProcessIpv6Packet(packetData, header, iface);
+            // Ensure timestampBuffer is large enough to hold the formatted timestamp
+            if (ctime_s(timestampBuffer, sizeof(timestampBuffer), &timestamp1) == 0)
+            {
+                packet.timestamp = timestampBuffer;
+            }
+            else
+            {
+                // Handle the error from ctime_s
+                packet.timestamp = "Error formatting timestamp";
+            }
         }
         else
         {
-            //logger.Log("Unknown adapter protocol\n");
-            std::cerr << "Unknown adapter protocol\n";
+            // Handle the case where timestamp is not a valid time_t value
+            packet.timestamp = "Invalid timestamp value";
         }
+
+        int headerSize = 0;
+        uint8_t ipHeaderLength = 0;
+        const u_char* ipHeader = nullptr;
+        uint16_t offset = 0;
+        uint16_t offset1 = 0;
+
+        if (handle != nullptr)
+        {
+            if (linkType == LinkType::ETHERNETFRAME || strstr(iface.interfaceDescription.c_str(), "Ethernet") || strstr(iface.interfaceName.c_str(), "vEthernet")) // link layer protocol is ethernet
+            {
+                // identify ip versions
+                const uint16_t ethType = (packetData[12] << 8) | packetData[13];
+
+                headerSize = ETHERNETHEADERSIZE;
+
+                if (ethType == 0x0800) // ipv4 ethernet frame
+                {
+                    // Extract ipv4 header information
+                    uint8_t ipVersion = (packetData[14] >> 4) & 0x0F;
+                    ipHeaderLength = (packetData[14] & 0x0F) * 4;
+
+                    // Extract protocol type
+                    uint8_t protocolType = packetData[ipHeaderLength + 9]; //TCP/UDP/ICMP
+
+                    ipHeader = packetData + headerSize;
+
+                    offset = headerSize + ipHeaderLength + 26;
+                    offset = headerSize + ipHeaderLength + 30;
+
+                    // Extract the flags, payload, source port and destination port
+                    if (protocolType == IPPROTO_TCP)
+                    {
+                        packet.protocol_type = "tcp";
+                        // Extract TCP header information
+                        uint8_t tcpHeaderLength = ((packetData[ipHeaderLength + 12] >> 4) & 0x0F) * 4; // in bytes
+                        packet.sourcePort = (packetData[ipHeaderLength] << 8) | packetData[ipHeaderLength + 1];
+                        packet.destinationPort = (packetData[ipHeaderLength + 2] << 8) | packetData[ipHeaderLength + 3];
+
+                        // Extract the TCP flag
+                        packet.flags = packetData[ipHeaderLength + 13];
+
+                        // Extract payload
+                        packet.payload = packetData + ipHeaderLength + tcpHeaderLength;
+                    }
+                    else if (protocolType == IPPROTO_UDP)
+                    {
+                        packet.protocol_type = "udp";
+                        // Extract UDP header information
+                        packet.sourcePort = (static_cast<uint16_t>(packetData[ipHeaderLength]) << 8) | packetData[ipHeaderLength + 1];
+                        packet.destinationPort = (static_cast<uint16_t>(packetData[ipHeaderLength + 2]) << 8) | packetData[ipHeaderLength + 3];
+                        uint16_t udpLength = (static_cast<uint16_t>(packetData[ipHeaderLength + 4]) << 8) | packetData[ipHeaderLength + 5];
+
+                        packet.payload = packetData + ipHeaderLength + udpLength;
+                    }
+                    else if (protocolType == IPPROTO_ICMP)
+                    {
+                        packet.protocol_type = "icmp";
+                        // Extract ICMP header information
+                        uint8_t icmpType = packetData[ipHeaderLength];
+                        uint8_t icmpCode = packetData[ipHeaderLength + 1];
+
+                        // ICMP does not have ports, so no need to extract source and destination ports
+
+                         // Flag-like logic based on ICMP Type (You can process the messages further to determine the flag returned)
+                        bool isEchoRequest = (icmpType == 8);  // ICMP Echo Request
+                        bool isEchoReply = (icmpType == 0);    // ICMP Echo Reply
+
+                        // Extract payload
+                        packet.payload = packetData + ipHeaderLength + 8; // ICMP header is typically 8 bytes
+                    }
+                    else
+                    {
+                        std::cerr << "Invalid protocol"<< std::endl;
+                    }
+
+                    packet.ttl = packetData[22];
+
+                    packet.sourceIp = bytesToUint32(&packetData[26]);
+                    packet.destIp = bytesToUint32(&packetData[30]);
+
+                }
+                else if (ethType == 0x86DD) // ipv6 ethernet frame
+                {
+                    // Extract ipv6 header information
+                    uint8_t versionTrafficClassFlowLabel = packetData[14];
+                    uint8_t payloadLength = packetData[18];
+                    uint8_t protocolType = packetData[20]; // Protocol type following IPv6 header
+                    uint8_t hopLimit = packetData[21]; //ttl
+
+                    packet.ttl = hopLimit;
+
+                    // Extract source and destination IPv6 addresses
+                    uint32_t sourceIPv6[16];
+                    uint32_t destIPv6[16];
+                    std::memcpy(sourceIPv6, &packetData[22], 16);
+                    std::memcpy(destIPv6, &packetData[38], 16);
+
+                    packet.sourceIp = (uint32_t)sourceIPv6;
+                    packet.destIp = (uint32_t)destIPv6;
+
+                    ipHeader = packetData + headerSize;
+
+                    offset = headerSize + 22;
+                    offset1 = headerSize + 24;
+
+                    // Extract the flags, payload, source port, and destination port (if applicable)
+                    if (protocolType == IPPROTO_TCP)
+                    {
+                        packet.protocol_type = "tcp";
+                        // Extract TCP header information
+                        packet.sourcePort = (packetData[54] << 8) | packetData[55];
+                        packet.destinationPort = (packetData[56] << 8) | packetData[57];
+
+                        // Extract the TCP flag
+                        packet.flags = packetData[62];
+
+                        // Extract payload
+                        packet.payload = packetData + 54; // Adjust the offset based on the actual header lengths
+                    }
+                    else if (protocolType == IPPROTO_UDP)
+                    {
+                        packet.protocol_type = "udp";
+                        // Extract UDP header information
+                        packet.sourcePort = (packetData[54] << 8) | packetData[55];
+                        packet.destinationPort = (packetData[56] << 8) | packetData[57];
+                        uint16_t udpLength = (packetData[58] << 8) | packetData[59];
+
+                        packet.payload = packetData + 54; // Adjust the offset based on the actual header lengths
+                    }
+                    else if (protocolType == IPPROTO_ICMPV6)
+                    {
+                        packet.protocol_type = "icmp";
+                        // Extract ICMPv6 header information
+                        uint8_t icmpType = packetData[54];
+                        uint8_t icmpCode = packetData[55];
+
+                        // ICMPv6 does not have ports, so no need to extract source and destination ports
+
+                        // Flag-like logic based on ICMPv6 Type
+                        // (You can process the messages further to determine the flag returned)
+                        bool isEchoRequest = (icmpType == 128);  // ICMPv6 Echo Request
+                        bool isEchoReply = (icmpType == 129);    // ICMPv6 Echo Reply
+
+                        packet.payload = packetData + 54; // Adjust the offset based on the actual header lengths
+                    }
+                    else
+                    {
+                        std::cerr << "Invalid protocol" << std::endl;
+                    }
+
+                }
+                else
+                {
+                    std::cerr << "Unknown version" << std::endl;
+                }
+            }
+            else if (linkType == LinkType::WIFIFRAME || strstr(iface.interfaceDescription.c_str(), "Wi-Fi") || strstr(iface.interfaceName.c_str(), "Wifi")) 
+            {
+                // Identify IP versions
+                const uint16_t ethType = (packetData[30] << 8) | packetData[31]; // Assuming Ethernet II frame
+
+                headerSize = WIFIHEADERSIZE;
+
+                if (ethType == 0x0800) 
+                { // IPv4 ethertype
+                    // Check if there is a Radiotap header
+                    uint8_t radiotapHeaderLength = 0;
+                    if (header.caplen >= 3) 
+                    {
+                        radiotapHeaderLength = packetData[2];
+                    }
+
+                    // Check if IEEE 802.11 header follows the Radiotap header
+                    uint8_t ieee80211FrameOffset = radiotapHeaderLength;
+
+                    // Assuming ieee80211FrameOffset is the offset to the beginning of the IEEE 802.11 header
+                    uint16_t frameControlField = (packetData[ieee80211FrameOffset + 1] << 8) | packetData[ieee80211FrameOffset];
+
+                    // Assuming the data frame control field is 2 bytes
+                    uint16_t dataFrameControlField = (packetData[ieee80211FrameOffset + 24 + 1] << 8) | packetData[ieee80211FrameOffset + 24];
+
+                    // Extract IEEE 802.11 header information
+                    uint8_t frameType = (dataFrameControlField & 0x0C) >> 2;  // Extract frame control type bits
+                    uint8_t frameSubtype = (dataFrameControlField & 0xF0) >> 4; // Extract frame subtype bits
+
+                    // Define header size based on frame type and subtype
+                    uint8_t ieee80211HeaderSize = 24; // Common header size
+
+                    if (frameType == 0x00 && frameSubtype == 0x08) 
+                    {
+                        // Management frame subtype 0x08 (Beacon frame) example
+                        // Beacon frames have a fixed size of 24 bytes for the management header
+                        ieee80211HeaderSize = 24;
+                    }
+                    else if (frameType == 0x02) 
+                    {
+                        // Data frame example
+                        ieee80211HeaderSize += 2;
+                    }
+
+                    // Assuming the presence of an IP payload (e.g., IPv4)
+                    uint8_t ipHeaderOffset = ieee80211FrameOffset + ieee80211HeaderSize;
+
+                    // Extract IP header information
+                    uint8_t ipVersion = (packetData[ipHeaderOffset] >> 4) & 0x0F;
+                    ipHeaderLength = (packetData[ipHeaderOffset] & 0x0F) * 4;
+
+                    // Extract protocol type
+                    uint8_t protocolType = packetData[ipHeaderOffset + 9]; // TCP/UDP/ICMP
+
+                    // Extract common information
+                    packet.ttl = packetData[ipHeaderOffset + 22];
+                    packet.sourceIp = bytesToUint32(&packetData[ipHeaderOffset + 26]);
+                    packet.destIp = bytesToUint32(&packetData[ipHeaderOffset + 30]);
+
+                    ipHeader = packetData + headerSize;
+
+                    offset = headerSize + ipHeaderLength + 26;
+                    offset1 = headerSize + ipHeaderLength + 30;
+
+                    // Handle specific protocols
+                    if (protocolType == IPPROTO_TCP) 
+                    {
+                        packet.protocol_type = "tcp";
+                        // Extract TCP header information
+                        uint8_t tcpHeaderLength = ((packetData[ipHeaderOffset + 12] >> 4) & 0x0F) * 4; // in bytes
+                        packet.sourcePort = (packetData[ipHeaderOffset] << 8) | packetData[ipHeaderOffset + 1];
+                        packet.destinationPort = (packetData[ipHeaderOffset + 2] << 8) | packetData[ipHeaderOffset + 3];
+
+                        // Extract the TCP flag
+                        packet.flags = packetData[ipHeaderOffset + 13];
+
+                        // Extract payload
+                        packet.payload = packetData + ipHeaderOffset + tcpHeaderLength;
+                    }
+                    else if (protocolType == IPPROTO_UDP) 
+                    {
+                        packet.protocol_type = "udp";
+                        // Extract UDP header information
+                        packet.sourcePort = (static_cast<uint16_t>(packetData[ipHeaderOffset]) << 8) | packetData[ipHeaderOffset + 1];
+                        packet.destinationPort = (static_cast<uint16_t>(packetData[ipHeaderOffset + 2]) << 8) | packetData[ipHeaderOffset + 3];
+                        uint16_t udpLength = (static_cast<uint16_t>(packetData[ipHeaderOffset + 4]) << 8) | packetData[ipHeaderOffset + 5];
+
+                        // No flags for UDP
+
+                        // Extract payload
+                        packet.payload = packetData + ipHeaderOffset + udpLength;
+                    }
+                    else if (protocolType == IPPROTO_ICMP) 
+                    {
+                        packet.protocol_type = "icmp";
+                        // Extract ICMP header information
+                        uint8_t icmpType = packetData[ipHeaderOffset];
+                        uint8_t icmpCode = packetData[ipHeaderOffset + 1];
+
+                        // ICMP does not have ports, so no need to extract source and destination ports
+
+                        // Flag-like logic based on ICMP Type (You can process the messages further to determine the flag returned)
+                        bool isEchoRequest = (icmpType == 8);  // ICMP Echo Request
+                        bool isEchoReply = (icmpType == 0);    // ICMP Echo Reply
+
+                        // Extract payload
+                        packet.payload = packetData + ipHeaderOffset + 8; // ICMP header is typically 8 bytes
+                    }
+                    else 
+                    {
+                        std::cerr << "Invalid protocol" << std::endl;
+                    }
+                }
+                else if (ethType == 0x86DD) 
+                { // IPv6 ethertype
+                    // Check if there is a Radiotap header
+                    uint8_t radiotapHeaderLength = 0;
+                    if (header.caplen >= 3) 
+                    {
+                        radiotapHeaderLength = packetData[2];
+                    }
+
+                    // Check if IEEE 802.11 header follows the Radiotap header
+                    uint8_t ieee80211FrameOffset = radiotapHeaderLength;
+
+                    // Assuming ieee80211FrameOffset is the offset to the beginning of the IEEE 802.11 header
+                    uint16_t frameControlField = (packetData[ieee80211FrameOffset + 1] << 8) | packetData[ieee80211FrameOffset];
+
+                    // Assuming the data frame control field is 2 bytes
+                    uint16_t dataFrameControlField = (packetData[ieee80211FrameOffset + 24 + 1] << 8) | packetData[ieee80211FrameOffset + 24];
+
+                    // Extract IEEE 802.11 header information
+                    uint8_t frameType = (dataFrameControlField & 0x0C) >> 2;  // Extract frame control type bits
+                    uint8_t frameSubtype = (dataFrameControlField & 0xF0) >> 4; // Extract frame subtype bits
+
+                    // Define header size based on frame type and subtype
+                    uint8_t ieee80211HeaderSize = 24; // Common header size
+
+                    if (frameType == 0x00 && frameSubtype == 0x08) 
+                    {
+                        // Management frame subtype 0x08 (Beacon frame) example
+                        // Beacon frames have a fixed size of 24 bytes for the management header
+                        ieee80211HeaderSize = 24;
+                    }
+                    else if (frameType == 0x02) 
+                    {
+                        // Data frame example
+                        ieee80211HeaderSize += 2;
+                    }
+
+                    // Assuming the presence of an IPv6 payload
+                    uint8_t ipv6HeaderOffset = ieee80211FrameOffset + ieee80211HeaderSize;
+
+                    // Extract IPv6 header information
+                    uint8_t versionTrafficClassFlowLabel = packetData[ipv6HeaderOffset];
+                    uint8_t payloadLength = packetData[ipv6HeaderOffset + 4];
+                    uint8_t nextHeader = packetData[ipv6HeaderOffset + 6]; // Protocol type following IPv6 header
+                    uint8_t hopLimit = packetData[ipv6HeaderOffset + 7];   // TTL
+
+                    packet.ttl = hopLimit;
+
+                    // Extract source and destination IPv6 addresses
+                    uint32_t sourceIPv6[4];
+                    uint32_t destIPv6[4];
+                    std::memcpy(sourceIPv6, &packetData[ipv6HeaderOffset + 8], 16);
+                    std::memcpy(destIPv6, &packetData[ipv6HeaderOffset + 24], 16);
+
+                    packet.sourceIp = (uint32_t)sourceIPv6;
+                    packet.destIp = (uint32_t)destIPv6;
+
+                    ipHeader = packetData + headerSize;
+
+                    offset = headerSize + 22;
+                    offset1 = headerSize + 24;
+
+                    // Extract the flags, payload, source port, and destination port (if applicable)
+                    if (nextHeader == IPPROTO_TCP) 
+                    {
+                        packet.protocol_type = "tcp";
+                        // Extract TCP header information
+                        packet.sourcePort = (packetData[ipv6HeaderOffset + 40] << 8) | packetData[ipv6HeaderOffset + 41];
+                        packet.destinationPort = (packetData[ipv6HeaderOffset + 42] << 8) | packetData[ipv6HeaderOffset + 43];
+
+                        // Extract the TCP flag
+                        packet.flags = packetData[ipv6HeaderOffset + 54];
+
+                        // Extract payload
+                        packet.payload = packetData + ipv6HeaderOffset + 40; // Adjust the offset based on the actual header lengths
+                    }
+                    else if (nextHeader == IPPROTO_UDP) 
+                    {
+                        packet.protocol_type = "udp";
+                        // Extract UDP header information
+                        packet.sourcePort = (packetData[ipv6HeaderOffset + 40] << 8) | packetData[ipv6HeaderOffset + 41];
+                        packet.destinationPort = (packetData[ipv6HeaderOffset + 42] << 8) | packetData[ipv6HeaderOffset + 43];
+                        uint16_t udpLength = (packetData[ipv6HeaderOffset + 44] << 8) | packetData[ipv6HeaderOffset + 45];
+
+                        // No flags for UDP
+
+                        packet.payload = packetData + ipv6HeaderOffset + 40; // Adjust the offset based on the actual header lengths
+                    }
+                    else if (nextHeader == IPPROTO_ICMPV6) 
+                    {
+                        packet.protocol_type = "icmp";
+                        // Extract ICMPv6 header information
+                        uint8_t icmpType = packetData[ipv6HeaderOffset + 40];
+                        uint8_t icmpCode = packetData[ipv6HeaderOffset + 41];
+
+                        // ICMPv6 does not have ports, so no need to extract source and destination ports
+
+                        // Flag-like logic based on ICMPv6 Type
+                        // (You can process the messages further to determine the flag returned)
+                        bool isEchoRequest = (icmpType == 128);  // ICMPv6 Echo Request
+                        bool isEchoReply = (icmpType == 129);    // ICMPv6 Echo Reply
+
+                        packet.payload = packetData + ipv6HeaderOffset + 40; // Adjust the offset based on the actual header lengths
+                    }
+                    else 
+                    {
+                        std::cerr << "Invalid protocol" << std::endl;
+                    }
+                }
+
+                else
+                {
+                    std::cerr << "Unknown version" << std::endl;
+                }
+            }
+            else
+            {
+                std::cerr << "Unsupported link layer protocol" << std::endl;
+            }
+            AttributeExtractor(packetData, packet, header, ipHeader, connectionTimeInSeconds, headerSize, ipHeaderLength, offset, offset1);
+        }
+        else
+        {
+            logger.Log("An error occurred");
+            std::cerr << "An error occurred" << std::endl;
+        }
+
         pcap_close(handle);
     }
 
@@ -720,7 +1505,7 @@ namespace DataCollection
     }
 
     // returning collected packets
-    std::map<std::string, std::vector<NetworkPacket>> PacketCollector::GetCapturedPackets()
+    std::map<std::string, std::vector<Packet>> PacketCollector::GetCapturedPackets()
     {
         std::lock_guard<std::mutex> lock(capturedPacketsMutex);
         return capturedPackets;
@@ -899,7 +1684,6 @@ namespace DataCollection
     }
 
     // data container to store training and testing data
-
     Data::Data()
     {
         featureVector = std::make_shared<std::vector<double>>();
@@ -1050,7 +1834,7 @@ namespace DataCollection
             }
 
             // parse the data point features
-            if (fields.size() == 42)
+            if (fields.size() == 41)
             {
                 // Encode protocol type
                 if (protocolType.find(fields[1]) == protocolType.end())
@@ -1074,7 +1858,7 @@ namespace DataCollection
                 data->AppendToFeatureVector(flag[fields[3]]);
 
                 // parse and convert each field to a double and append it to the feature vector
-                for (size_t i = 4; i < fields.size() - 1; i++)
+                for (size_t i = 4; i < fields.size(); i++)
                 {
                     try
                     {

@@ -151,7 +151,11 @@ namespace PacketAnalyzer
 
 		if (metric == DistanceMetric::EUCLID)
 		{
-			distance = sqrt(distance);
+			return sqrt(distance);
+		}
+		else
+		{
+			return distance;
 		}
 		
 	}
@@ -218,21 +222,21 @@ namespace PacketAnalyzer
 				count++;
 			}
 		}
-		double accuracy = static_cast<double>(count) / testData->size();
+		accuracy = static_cast<double>(count) / testData->size();
 
 		currentPerformance = ((double)count * 100) / ((double)testData->size());
 		printf("Test performance = %.3f %%\n", currentPerformance);
 
 		// log accuracy
-		std::cout << "Accuracy: " << accuracy * 100 << std::endl;
+		std::cout << "Accuracy: " << accuracy * 100 <<  std::endl;
 
 		// Calculate and log precision
 		precision = CalculatePrecision(testData);
-		std::cout << "Precision: " << precision << std::endl;
+		std::cout << "Precision: " << precision * 100 << std::endl;
 
 		// Calculate and log recall
 		recall = CalculateRecall(testData);
-		std::cout << "Recall: " << recall << std::endl;
+		std::cout << "Recall: " << recall * 100 << std::endl;
 
 		// Calculate and log F1 score
 		f1Score = CalculateF1Score(testData);
@@ -258,7 +262,7 @@ namespace PacketAnalyzer
 
 	// Calculate precision
 	double KNN::CalculatePrecision(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data) {
-		if (!data || data->size()) 
+		if (!data || !data->size()) 
 		{
 			std::cerr << "Error: Invalid data or label input." << std::endl;
 			return 0.0;
@@ -291,7 +295,7 @@ namespace PacketAnalyzer
 
 	// Calculate recall
 	double KNN::CalculateRecall(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data) {
-		if (!data || data->size()) 
+		if (!data || !data->size()) 
 		{
 			std::cerr << "Error: Invalid data or label input." << std::endl;
 			return 0.0;
@@ -325,7 +329,7 @@ namespace PacketAnalyzer
 	// Calculate F1-score
 	double KNN::CalculateF1Score(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data)
 	{
-		if (!data || data->size())
+		if (!data || !data->size())
 		{
 			std::cerr << "Error: Invalid data or label input." << std::endl;
 			return 0.0;
@@ -345,7 +349,7 @@ namespace PacketAnalyzer
 	// Calculate confusion matrix
 	void KNN::CalculateConfusionMatrix(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data, std::vector<std::vector<int>>& confusionMatrix) 
 	{
-		if (!data || data->size()) 
+		if (!data || !data->size()) 
 		{
 			std::cerr << "Error: Invalid data or label input." << std::endl;
 			return;

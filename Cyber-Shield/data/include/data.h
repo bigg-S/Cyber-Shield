@@ -38,17 +38,68 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#pragma comment(lib, "wpcap.lib")
+#pragma comment(lib, "ws2_32.lib")
+
 namespace DataCollection
 {
+    struct Datapoint
+    {
+        int duration = 0;        
+        std::string protocol_type = "";
+        std::string service = "";
+        std::string flag = "";
+        int src_bytes = 0;
+        int dst_bytes = 0;
+        int land = 0;
+        int wrong_fragment = 0;
+        int urgent = 0;                
+        int hot = 0;
+        int num_failed_logins = 0;
+        int logged_in = 0;
+        int num_compromised = 0;
+        int root_shell = 0;
+        int su_attempted = 0;
+        int num_root = 0;
+        int num_file_creations = 0;
+        int num_shells = 0;
+        int num_access_files = 0;
+        int num_outbound_cmds = 0;
+        int is_host_login = 0;
+        int is_guest_login = 0;
+        int count = 0;
+        int srv_count = 0;
+        double serror_rate = 0.0;
+        double srv_serror_rate = 0.0;
+        double rerror_rate = 0.0;
+        double srv_rerror_rate = 0.0;
+        double same_srv_rate = 0.0;
+        double diff_srv_rate = 0.0;
+        double srv_diff_host_rate = 0.0;
+        int dst_host_count = 0;
+        int dst_host_srv_count = 0;
+        double dst_host_same_srv_rate = 0.0;
+        double dst_host_diff_srv_rate = 0.0;
+        double dst_host_same_src_port_rate = 0.0;
+        double dst_host_srv_diff_host_rate = 0.0;
+        double dst_host_serror_rate = 0.0;
+        double dst_host_srv_serror_rate = 0.0;
+        double dst_host_rerror_rate = 0.0;
+        double dst_host_srv_rerror_rate = 0.0;
+        int sourcePort = 0;
+        int destinationPort = 0;
+    };
+
     // Define the structure for the Ethernet header
-    struct EthernetHeader {
+    struct EthernetHeader 
+    {
         uint8_t destinationMac[6];  // Destination MAC address
         uint8_t sourceMac[6];       // Source MAC address
         uint16_t etherType;         // Ether Type (e.g., IPv4, ARP, etc.)
     };
 
     // Define the structure for the IP header
-    struct Ipv4Header
+    struct IpHeader
     {
         uint8_t version;               // IP version (e.g., 4 for IPv4, 6 for IPv6)
         uint8_t headerLength;          // Header length in 32-bit words
@@ -63,38 +114,35 @@ namespace DataCollection
         std::string destinationIp;     // Destination IP address (string representation)
     };
 
-    struct IPv6Header {
-        uint8_t version;
-        uint8_t trafficClass;
-        uint32_t flowLabel;
-        uint16_t payloadLength;
-        uint8_t nextHeader;
-        uint8_t hopLimit;
-        uint16_t totalLength;
-        uint8_t protocol;
-        uint8_t ttl;
-        uint8_t tos;
-        struct in6_addr sourceIp;
-        struct in6_addr destinationIp;
-    };
-
     // Define the structure for a network packet
-    struct NetworkPacket
+    struct Packet
     {
-        std::string networkInterface;     
-        EthernetHeader ethernetHeader;    
-        Ipv4Header ipHeader;              
-        uint16_t sourcePort;              
-        uint16_t destinationPort;         
-        uint32_t sequenceNumber;          
-        uint32_t acknowledgmentNumber;    
-        uint16_t flags;                   
-        uint16_t checksum;                
-        std::vector<uint8_t> applicationData;  // Application layer data (payload)
+        std::string networkInterface;     // Interface from which the packet is captured
+        EthernetHeader ethernetHeader;    // Ethernet header
+        IpHeader ipHeader;                // IP header
+        uint16_t sourcePort = 0;              // Source port (e.g., for TCP or UDP)
+        uint16_t destinationPort = 0;         // Destination port (e.g., for TCP or UDP)
+        uint32_t sequenceNumber;          // Sequence number (e.g., for TCP)
+        uint32_t acknowledgmentNumber;    // Acknowledgment number (e.g., for TCP)
+        uint16_t flags = 0;                   // Flags (e.g., for TCP)
+        uint16_t checksum;                // Checksum (e.g., for TCP or UDP)
+        const u_char* payload;  // Application layer data (payload)
         std::string timestamp;
-        int packetNumber;
+        std::string protocol_type;
+        uint8_t ttl = 0;
+        uint32_t sourceIp;
+        uint32_t destIp;
     };
 
+    // a connection
+    struct Connection 
+    {
+        uint32_t sourceIP;
+        uint16_t sourcePort;
+        uint32_t destIP;
+        uint16_t destPort;
+        std::string flags;
+    };
 
     // Define a structure to represent endpoint data
     struct EndpointData
@@ -211,21 +259,22 @@ namespace DataCollection
     {
     private:
         // Constants for header sizes
-        const int EthernetHeaderSize = 14;
-        const int WiFiHeaderSize = 24;
-        const int IPv4HeaderSize = 20;
-        const int IPv6HeaderSize = 40;
+        const int ETHERNETHEADERSIZE = 14;
+        const int WIFIHEADERSIZE = 24;
+        const int IPV4HEADERSIZE = 20;
+        const int IPV6HEADERSIZE = 40;
 
         enum LinkType 
         {
-            EthernetFrame = DLT_EN10MB,
-            WifiFrame = DLT_IEEE802_11
+            ETHERNETFRAME = DLT_EN10MB,
+            WIFIFRAME = DLT_IEEE802_11
         };
 
         const std::vector<NetworkInterface>& networkInterfaces;        
-        std::map<std::string, std::vector<NetworkPacket>> capturedPackets;
+        std::map<std::string, std::vector<Packet>> capturedPackets;
         // store captured packets
-        std::vector<NetworkPacket> capturedPacketsArr;
+        std::vector<Packet> capturedPacketsArr;
+        std::vector<Connection> connectionsTable;
 
         std::vector<std::thread> threads;
 
@@ -233,6 +282,7 @@ namespace DataCollection
         std::mutex instanceMutex;
         std::mutex startMutex;
         std::mutex isCapturingMutex;
+        std::mutex connTable;
 
         std::condition_variable startCV;  //global condition variable for synchronization
 
@@ -246,22 +296,20 @@ namespace DataCollection
 
         NetworkLogger& logger;
 
-        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
+        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface, std::chrono::system_clock::time_point capturStartTime);
 
     public:
         PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, NetworkLogger& logger);
         ~PacketCollector();
 
+        uint32_t bytesToUint32(const uint8_t* bytes);
         void StartCapture();
         void StopCapture();
         void CapturePackets(const NetworkInterface& iface);
-        bool IsIpv4Packet(const u_char* packetData, int linkType);
-        bool IsIpv6Packet(const u_char* packetData, int linkType);
-        void ProcessIpv4Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
-        void ProcessIpv6Packet(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
+        Datapoint AttributeExtractor(const u_char*, Packet, const struct pcap_pkthdr&, const u_char*, int, int, uint8_t, uint16_t, uint16_t);
         static void StaticSignalHandler(int signal); // static function to serve as an inermediary to call the non-static SignalHandler functio
         void SignalHandler(int signal);
-        std::map<std::string, std::vector<NetworkPacket>> GetCapturedPackets();
+        std::map<std::string, std::vector<Packet>> GetCapturedPackets();
     };
 
 
