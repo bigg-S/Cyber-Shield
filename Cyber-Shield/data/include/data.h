@@ -24,6 +24,7 @@
 #include <csignal>
 
 #include <WinSock2.h>
+#include <iphlpapi.h>
 
 #include <chrono>
 #include <random>
@@ -31,6 +32,8 @@
 
 #include <pcap.h>
 
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -43,6 +46,124 @@
 
 namespace DataCollection
 {
+    // Ethernet header
+    struct ETHER_HEADER 
+    {
+        UCHAR ether_dhost[6];   // Destination MAC address
+        UCHAR ether_shost[6];   // Source MAC address
+        USHORT ether_type;      // Ethernet type
+    };
+
+    // Define the IP header structure for Windows
+    struct IP 
+    {
+        #if defined(_WIN32)
+            unsigned char ip_vhl;         // version << 4 | header length >> 2
+            unsigned char ip_tos;         // type of service
+            short ip_len;                 // total length
+            unsigned short ip_id;         // identification
+            short ip_off;                 // fragment offset field
+        #define IP_RF 0x8000              // reserved fragment flag
+        #define IP_DF 0x4000              // dont fragment flag
+        #define IP_MF 0x2000              // more fragments flag
+            unsigned char ip_ttl;         // time to live
+            unsigned char ip_p;           // protocol
+            unsigned short ip_sum;        // checksum
+            struct in_addr ip_src, ip_dst; // source and dest address
+        #else
+        #endif
+    };
+
+    // IPV6 packet header
+    struct IPV6_HEADER 
+    {
+        uint8_t versionTrafficClass[4]; // 4 bits version, 8 bits traffic class, 20 bits flow label
+        uint16_t payloadLength;         // Payload length
+        uint8_t nextHeader;             // Protocol type following IPv6 header
+        uint8_t hopLimit;               // TTL
+        struct in6_addr sourceIPv6;     // Source IPv6 address
+        struct in6_addr destIPv6;       // Destination IPv6 address
+    };
+
+    // TCP header
+    struct TCP 
+    {
+            u_short th_sport;	/* source port */
+            u_short th_dport;	/* destination port */
+            u_int th_seq;		/* sequence number */
+            u_int th_ack;		/* acknowledgement number */
+            u_char th_offx2;	/* data offset, rsvd */
+    #define TH_OFF(th)	(((th)->th_offx2 & 0xf0) >> 4)
+            u_char th_flags;
+    #define TH_FIN 0x01
+    #define TH_SYN 0x02
+    #define TH_RST 0x04
+    #define TH_PUSH 0x08
+    #define TH_ACK 0x10
+    #define TH_URG 0x20
+    #define TH_ECE 0x40
+    #define TH_CWR 0x80
+    #define TH_FLAGS (TH_FIN|TH_SYN|TH_RST|TH_ACK|TH_URG|TH_ECE|TH_CWR)
+            u_short th_win;		/* window */
+            u_short th_sum;		/* checksum */
+            u_short th_urp;		/* urgent pointer */
+    };
+
+    // the UDP header structure
+    struct UDP 
+    {
+        unsigned short source_port;   // Source port
+        unsigned short dest_port;     // Destination port
+        unsigned short length;        // Datagram length
+        unsigned short checksum;      // Checksum
+    };
+
+    // the ICMP header structure
+    struct ICMP 
+    {
+        unsigned char type;           // ICMP message type
+        unsigned char code;           // Sub-code
+        unsigned short checksum;      // Checksum
+        unsigned short id;            // Identifier (used in some ICMP messages)
+        unsigned short sequence;      // Sequence Number (used in some ICMP messages)
+        // Additional fields depending on the ICMP message type
+    };
+
+    // For wi-fi frames
+    // Management frame header
+    struct ManagementFrameHeader 
+    {
+        uint16_t frameControl;
+        uint16_t duration;
+        uint8_t receiverAddress[6];
+        uint8_t transmitterAddress[6];
+        uint8_t destinationAddress[6];
+        uint16_t fragmentNumber : 4;
+        uint16_t sequenceNumber : 12;
+    };
+
+    // Control frame header
+    struct ControlFrameHeader 
+    {
+        uint16_t frameControl;
+        uint16_t duration;
+        uint8_t receiverAddress[6];
+        uint8_t transmitterAddress[6];
+    };
+
+    // Data frame header
+    struct DataFrameHeader 
+    {
+        uint16_t frameControl;
+        uint16_t duration;
+        uint8_t receiverAddress[6];
+        uint8_t transmitterAddress[6];
+        uint8_t destinationAddress[6];
+        uint16_t fragmentNumber : 4;
+        uint16_t sequenceNumber : 12;
+    };
+
+    // An item for the machine learning model
     struct Datapoint
     {
         int duration = 0;        
@@ -90,58 +211,33 @@ namespace DataCollection
         int destinationPort = 0;
     };
 
-    // Define the structure for the Ethernet header
-    struct EthernetHeader 
-    {
-        uint8_t destinationMac[6];  // Destination MAC address
-        uint8_t sourceMac[6];       // Source MAC address
-        uint16_t etherType;         // Ether Type (e.g., IPv4, ARP, etc.)
-    };
-
-    // Define the structure for the IP header
-    struct IpHeader
-    {
-        uint8_t version;               // IP version (e.g., 4 for IPv4, 6 for IPv6)
-        uint8_t headerLength;          // Header length in 32-bit words
-        uint8_t tos;                   // Type of Service (TOS)
-        uint16_t totalLength;          // Total length of the packet (header + data)
-        uint16_t identification;       // Packet identification (used for fragmentation)
-        uint16_t flagsFragmentOffset;  // Flags and Fragment Offset (used for fragmentation)
-        uint8_t ttl;                   // Time to Live (TTL)
-        uint8_t protocol;              // Protocol type (e.g., 6 for TCP, 17 for UDP)
-        uint16_t headerChecksum;       // Header checksum
-        std::string sourceIp;          // Source IP address (string representation)
-        std::string destinationIp;     // Destination IP address (string representation)
-    };
-
-    // Define the structure for a network packet
+    // Packet structure
     struct Packet
     {
-        std::string networkInterface;     // Interface from which the packet is captured
-        EthernetHeader ethernetHeader;    // Ethernet header
-        IpHeader ipHeader;                // IP header
-        uint16_t sourcePort = 0;              // Source port (e.g., for TCP or UDP)
-        uint16_t destinationPort = 0;         // Destination port (e.g., for TCP or UDP)
-        uint32_t sequenceNumber;          // Sequence number (e.g., for TCP)
-        uint32_t acknowledgmentNumber;    // Acknowledgment number (e.g., for TCP)
-        uint16_t flags = 0;                   // Flags (e.g., for TCP)
-        uint16_t checksum;                // Checksum (e.g., for TCP or UDP)
-        const u_char* payload;  // Application layer data (payload)
+        struct in_addr ip_src;
+        struct in_addr ip_dst;
+        struct in6_addr ip6_src;
+        struct in6_addr ip6_dst;
+        unsigned short source_port;
+        unsigned short dest_port;
+        unsigned char ip_ttl;
+        unsigned char ip_p;
+        u_char flags;
         std::string timestamp;
+        const UCHAR* payload;
         std::string protocol_type;
-        uint8_t ttl = 0;
-        uint32_t sourceIp;
-        uint32_t destIp;
     };
 
     // a connection
     struct Connection 
     {
-        uint32_t sourceIP;
-        uint16_t sourcePort;
-        uint32_t destIP;
-        uint16_t destPort;
-        std::string flags;
+        struct in_addr ip_src;
+        struct in_addr ip_dst;
+        struct in6_addr ip6_src;
+        struct in6_addr ip6_dst;
+        u_short sport;
+        u_short dport;
+        u_char flags;
     };
 
     // Define a structure to represent endpoint data
@@ -306,7 +402,9 @@ namespace DataCollection
         void StartCapture();
         void StopCapture();
         void CapturePackets(const NetworkInterface& iface);
-        Datapoint AttributeExtractor(const u_char*, Packet, const struct pcap_pkthdr&, const u_char*, int, int, uint8_t, uint16_t, uint16_t);
+        bool IsMemoryReadable(const void* ptr, size_t size);
+        std::string ConvertIPv6AddressToString(const uint8_t* ipv6Address);
+        Datapoint AttributeExtractor(const u_char*, Packet, const struct pcap_pkthdr&, const IP*, int, int, uint8_t, uint16_t, uint16_t);
         static void StaticSignalHandler(int signal); // static function to serve as an inermediary to call the non-static SignalHandler functio
         void SignalHandler(int signal);
         std::map<std::string, std::vector<Packet>> GetCapturedPackets();
