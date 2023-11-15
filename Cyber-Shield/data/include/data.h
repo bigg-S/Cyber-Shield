@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <shared_mutex>
 
 #include <typeinfo>
 
@@ -27,6 +28,7 @@
 #include <iphlpapi.h>
 
 #include <chrono>
+#include <ctime>
 #include <random>
 #include <random>
 
@@ -207,8 +209,6 @@ namespace DataCollection
         double dst_host_srv_serror_rate = 0.0;
         double dst_host_rerror_rate = 0.0;
         double dst_host_srv_rerror_rate = 0.0;
-        int sourcePort = 0;
-        int destinationPort = 0;
     };
 
     // Packet structure
@@ -238,6 +238,8 @@ namespace DataCollection
         u_short sport;
         u_short dport;
         u_char flags;
+        std::string timestamp;
+        std::string payloadString;
     };
 
     // Define a structure to represent endpoint data
@@ -371,6 +373,7 @@ namespace DataCollection
         // store captured packets
         std::vector<Packet> capturedPacketsArr;
         std::vector<Connection> connectionsTable;
+        std::vector<Datapoint> datapoints;
 
         std::vector<std::thread> threads;
 
@@ -379,6 +382,10 @@ namespace DataCollection
         std::mutex startMutex;
         std::mutex isCapturingMutex;
         std::mutex connTable;
+        std::mutex datapointMutex;
+        std::mutex connectionsMutex;
+        std::mutex connectionsMutex1;
+
 
         std::condition_variable startCV;  //global condition variable for synchronization
 
@@ -402,12 +409,14 @@ namespace DataCollection
         void StartCapture();
         void StopCapture();
         void CapturePackets(const NetworkInterface& iface);
-        bool IsMemoryReadable(const void* ptr, size_t size);
+        int countConnectionsToSameService(const Packet& currentConnection, std::vector<Connection>& connections, int numConnections);
+        int countConnectionsToSameDestination(const Packet& currentConnection, std::vector<Connection>& connections, int numConnections);
         std::string ConvertIPv6AddressToString(const uint8_t* ipv6Address);
         Datapoint AttributeExtractor(const u_char*, Packet, const struct pcap_pkthdr&, const IP*, int, int, uint8_t, uint16_t, uint16_t);
         static void StaticSignalHandler(int signal); // static function to serve as an inermediary to call the non-static SignalHandler functio
         void SignalHandler(int signal);
         std::map<std::string, std::vector<Packet>> GetCapturedPackets();
+        std::vector<Datapoint> GetDatapoints();
     };
 
 

@@ -60,7 +60,7 @@ namespace DataCollection
             {
                 // Handle the case where _dupenv_s fails to retrieve the PATH variable
                 //You can provide a default PATH value or handle the error accordingly
-                std::cerr << "Failed to retrieve the PATH variable." << std::endl;
+                //std::cerr << "Failed to retrieve the PATH variable." << std::endl;
                 logger.Log("Failed to retrieve the PATH variable.");
             }
 
@@ -227,7 +227,7 @@ namespace DataCollection
         {
             // handle necessary exception
             logger.Log("Error: Error during metadata collection: " + std::string(e.what()));
-            std::cerr << "Error: Error during metadata collection: " << e.what() << std::endl;
+            //std::cerr << "Error: Error during metadata collection: " << e.what() << std::endl;
             return "Error: Metadata collection failed";
         }
     }
@@ -256,28 +256,194 @@ namespace DataCollection
         }
     }
 
-    // checking for invalid memory 
-    bool PacketCollector::IsMemoryReadable(const void* ptr, size_t size)
-    {
-        const char* charPtr = static_cast<const char*>(ptr);
-        for (size_t i = 0; i < size; ++i)
+    // function to check the number of connections to the same service
+    int PacketCollector::countConnectionsToSameService(const Packet& currentConnection, std::vector<Connection>& connections, int numConnections)
+    {       
+
+        // Check if numConnections is less than or equal to zero
+        if (numConnections <= 0) {
+            logger.Log("Error: Invalid numConnections");
+            return 0;  // or handle the error accordingly
+        }
+        
+        // Check if connections vector is empty
+        if (connections.empty()) {
+            logger.Log("Error: Connections vector is empty");
+            return 0;  // or handle the error accordingly
+        }
+        
+        std::vector<Connection> connectionscpy = connections;
+        
+        // Initialize a counter for connections to the same service
+        int connectionsToSameService = 0;
+        
+        // Parse the timestamp of the current connection
+        std::tm currentTimestamp;
+        std::istringstream timestampStream(currentConnection.timestamp);
+        timestampStream >> std::get_time(&currentTimestamp, "%a %b %d %H:%M:%S %Y");
+        
+        // Check if parsing was successful
+        if (!timestampStream.fail())
         {
-            if (charPtr[i] == '\0')
+            // Convert the current timestamp to a time_point
+            auto currentConnectionTimePoint = std::chrono::system_clock::from_time_t(std::mktime(&currentTimestamp));
+        
+            // Calculate the timestamp for two seconds ago
+            auto twoSecondsAgo = currentConnectionTimePoint - std::chrono::seconds(2);
+        
+            // Iterate through the connections array
+            for (int i = 0; i < connectionscpy.size(); ++i)
             {
-                return false;  // Null terminator found, indicating invalid memory
+                // Parse the timestamp of the current array element
+                std::tm arrayElementTimestamp;
+                std::istringstream arrayElementTimestampStream(connectionscpy[i].timestamp);
+                arrayElementTimestampStream >> std::get_time(&arrayElementTimestamp, "%a %b %d %H:%M:%S %Y");
+        
+                // Check if parsing was successful
+                if (!arrayElementTimestampStream.fail())
+                {
+                    // Convert the array element timestamp to a time_point
+                    auto arrayElementTimePoint = std::chrono::system_clock::from_time_t(std::mktime(&arrayElementTimestamp));
+        
+                    // Check if the connection occurred within the past two seconds
+                    if (arrayElementTimePoint >= twoSecondsAgo && arrayElementTimePoint <= currentConnectionTimePoint)
+                    {
+                        // Check if the current connection has the same destination port as the current array element
+                        if (connectionscpy[i].dport == currentConnection.dest_port)
+                        {
+                            // Increment the counter
+                            connectionsToSameService++;
+                        }
+                    }
+                }
+                else
+                {
+                    // Handle parsing error for array element timestamp
+                    logger.Log("Error parsing timestamp for array element " + std::to_string(i));
+                    //std::cerr << "Error parsing timestamp for array element " << i << std::endl;
+                }
             }
         }
-        return true;
+        else
+        {
+            // Handle parsing error for current connection timestamp
+            logger.Log("Error parsing timestamp for the current connection");
+            //std::cerr << "Error parsing timestamp for the current connection" << std::endl;
+        }
+        
+        return connectionsToSameService;
+        
+    }
+
+
+    int PacketCollector::countConnectionsToSameDestination(const Packet& currentConnection, std::vector<Connection>& connections, int numConnections) 
+    {
+
+        in6_addr emptyIpv6;
+        in_addr emptyIpv4;
+
+        memset(&emptyIpv6, 0, sizeof(emptyIpv6)); // initialize to 0
+        memset(&emptyIpv4, 0, sizeof(emptyIpv4)); // initialize to 0 
+
+        // a copy of the array
+        std::vector<Connection> connectionscpy = connections;
+
+        // Initialize a counter for connections to the same service
+        int connectionsToSameService = 0;
+
+        // Check if the connections vector is not empty
+        if (!connectionscpy.empty())
+        {
+            // Parse the timestamp of the current connection
+            std::tm currentTimestamp;
+            std::istringstream timestampStream(currentConnection.timestamp);
+            timestampStream >> std::get_time(&currentTimestamp, "%a %b %d %H:%M:%S %Y");
+
+            // Check if parsing was successful
+            if (!timestampStream.fail())
+            {
+                // Convert the current timestamp to a time_point
+                auto currentConnectionTimePoint = std::chrono::system_clock::from_time_t(std::mktime(&currentTimestamp));
+
+                // Calculate the timestamp for two seconds ago
+                auto twoSecondsAgo = currentConnectionTimePoint - std::chrono::seconds(2);
+
+                // Iterate through the connections array
+                for (int i = 0; i < connectionscpy.size(); ++i)
+                {
+                    // Parse the timestamp of the current array element
+                    std::tm arrayElementTimestamp;
+                    std::istringstream arrayElementTimestampStream(connectionscpy[i].timestamp);
+                    arrayElementTimestampStream >> std::get_time(&arrayElementTimestamp, "%a %b %d %H:%M:%S %Y");
+
+                    // Check if parsing was successful
+                    if (!arrayElementTimestampStream.fail())
+                    {
+                        // Convert the array element timestamp to a time_point
+                        auto arrayElementTimePoint = std::chrono::system_clock::from_time_t(std::mktime(&arrayElementTimestamp));
+
+                        // Check if the connection occurred within the past two seconds
+                        if (arrayElementTimePoint >= twoSecondsAgo && arrayElementTimePoint <= currentConnectionTimePoint)
+                        {
+                            // Check if the current connection has the same destination host as the current array element
+
+                            if (memcmp(&connectionscpy[i].ip6_dst, &emptyIpv6, sizeof(in6_addr)) != 0 && memcmp(&currentConnection.ip6_dst, &emptyIpv6, sizeof(in6_addr)) != 0)
+                            {
+                                // Check if the current connection has the same destination port as the current array element
+                                if (memcmp(&connectionscpy[i].ip6_dst, &currentConnection.ip6_dst, sizeof(in6_addr)) == 0)
+                                {
+                                    // Increment the counter
+                                    connectionsToSameService++;
+                                }
+                            }
+                            else
+                            {
+                                // Check if the current connection has the same destination port as the current array element
+                                if (memcmp(&connectionscpy[i].ip_dst, &currentConnection.ip_dst, sizeof(in_addr)) != 0)
+                                {
+                                    // Increment the counter
+                                    connectionsToSameService++;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Handle parsing error for array element timestamp
+                        logger.Log("Error parsing timestamp for array element " + std::to_string(i) + ": " + connections[i].timestamp);
+                    }
+                }
+            }
+            else
+            {
+                // Handle parsing error for current connection timestamp
+                logger.Log("Error parsing timestamp for the current connection");
+            }
+        }
+        else
+        {
+            // Handle the case where the connections vector is empty
+            logger.Log("Connections vector is empty");
+        }
+
+        return connectionsToSameService;
+       
     }
 
     Datapoint PacketCollector::AttributeExtractor(const u_char* packetData, Packet packet, const struct pcap_pkthdr& header, const IP* ipHeader, int connectionTime, int headerSize, uint8_t ipHeaderLength, uint16_t srcBytes, uint16_t dstBytes)
     {
-        Datapoint datapoint;
+         Datapoint datapoint;
         // store the connection in the connection table
         Connection connection;
 
         // Extract IP header fields
-        datapoint.duration = connectionTime;
+        datapoint.duration = connectionTime - 1699;
+
+        if (packet.protocol_type.empty())
+        {
+            packet.protocol_type = "other";
+        }
+
         datapoint.protocol_type = packet.protocol_type;
 
         // determining the service
@@ -312,9 +478,29 @@ namespace DataCollection
                 break;
             case 22:
                 datapoint.service = "ssh";
+                break;
+            case 105:
+                datapoint.service = "csnet_s";
+                break;
+            case 11:
+                datapoint.service = "systat";
+                break;
+            case 106:
+                datapoint.service = "eco_i";
+                break;
+            case 389:
+                datapoint.service = "idap";
+                break;
+            case 540:
+                datapoint.service = "uucp";
+                break;
+            case 43:
+                datapoint.service = "whois";
+                break;
             default:
                 datapoint.service = "other";
             }
+
         }
         else if (datapoint.protocol_type == "udp")
         {
@@ -325,7 +511,7 @@ namespace DataCollection
             switch (destPort)
             {
             case 53:
-                datapoint.service = "dns";
+                datapoint.service = "domain_u";
                 break;
             case 67:
             case 68:
@@ -340,6 +526,7 @@ namespace DataCollection
             case 137:
                 datapoint.service = "netbios";
                 break;
+                break;
             default:
                 datapoint.service = "other";
             }
@@ -350,7 +537,7 @@ namespace DataCollection
             const u_char* icmpHeader = packetData + headerSize + ipHeaderLength;
 
             // Extract the ICMP type
-            uint8_t icmpType = icmpHeader[0];
+            uint8_t icmpType = (icmpHeader != nullptr) ? icmpHeader[0] : 0;
 
             // Determine the service based on the ICMP type
             switch (icmpType)
@@ -446,7 +633,7 @@ namespace DataCollection
         else if (datapoint.protocol_type == "icmp")
         {
             const u_char* icmpHeader = reinterpret_cast<const u_char*>(ipHeader) + ipHeaderLength; // Offset for the start of the ICMP header
-            uint8_t icmpType = icmpHeader[0];
+            uint8_t icmpType = (icmpHeader != nullptr) ? icmpHeader[0] : 0;
 
             // Check the ICMP type to determine the active flag
             switch (icmpType) {
@@ -473,7 +660,13 @@ namespace DataCollection
             connection.flags = reinterpret_cast < u_char>("other");
         }
 
-        if (memcmp(&packet.ip6_src, &packet.ip6_dst, sizeof(in6_addr)) == 0)
+        in6_addr emptyipv6;
+        in_addr emptyipv4;
+
+        memset(&emptyipv6, 0, sizeof(in6_addr));
+        memset(&emptyipv4, 0, sizeof(in_addr));
+
+        if (memcmp(&packet.ip6_src, &emptyipv6, sizeof(in6_addr)) != 0)
         {
             connection.ip6_src = packet.ip6_src;
             connection.ip6_dst = packet.ip6_dst;
@@ -490,9 +683,10 @@ namespace DataCollection
         datapoint.src_bytes = srcBytes;
         datapoint.dst_bytes = dstBytes;
 
-        if(packet.ip_src.S_un.S_addr && packet.ip_dst.S_un.S_addr)
-            datapoint.land = (packet.ip_src.S_un.S_addr == packet.ip_dst.S_un.S_addr && packet.source_port == packet.dest_port) ? 1 : 0;
-        else
+
+        if(memcmp(&packet.ip_src, &emptyipv4, sizeof(in_addr)) != 0 && memcmp(&packet.ip_dst, &emptyipv4, sizeof(in_addr)) != 0)
+            datapoint.land = (memcmp(&packet.ip_src, &packet.ip_dst, sizeof(in_addr)) == 0 && packet.source_port == packet.dest_port) ? 1 : 0;
+        else if (memcmp(&packet.ip6_src, &emptyipv6, sizeof(in6_addr)) != 0 && memcmp(&packet.ip6_dst, &emptyipv6, sizeof(in6_addr)) != 0)
             datapoint.land = (memcmp(&packet.ip6_src, &packet.ip6_dst, sizeof(in6_addr)) == 0 && packet.source_port == packet.dest_port) ? 1 : 0;
 
 
@@ -502,7 +696,7 @@ namespace DataCollection
             const u_char* tcpHeader = packetData + headerSize + ipHeaderLength;
 
             // Extract the TCP flags field (byte 13 of the TCP header)
-            uint8_t tcpFlags = tcpHeader[13];
+            uint8_t tcpFlags = (tcpHeader != nullptr) ? tcpHeader[13] : 0;
 
             // Check if the URG (urgent) and DF (don't fragment) flags are set
             bool urgentFlagSet = (tcpFlags & 0x20) != 0;
@@ -539,8 +733,8 @@ namespace DataCollection
             const u_char* icmpHeader = packetData + headerSize + ipHeaderLength;
 
             // Extract the ICMP type and code
-            uint8_t icmpType = icmpHeader[0];
-            uint8_t icmpCode = icmpHeader[1];
+            uint8_t icmpType = (icmpHeader != nullptr) ? icmpHeader[0] : 0;
+            uint8_t icmpCode = (icmpHeader != nullptr) ? icmpHeader[1] : 0;
 
             // Example conditions for ICMP (adjust as needed)
             bool wrongFragmentCondition = (icmpType == 3 && icmpCode == 4); // Example: ICMP Destination Unreachable, Fragmentation Needed
@@ -555,7 +749,8 @@ namespace DataCollection
         }
         else
         {
-            std::cerr << "Unknown fragment or urgent flag"<< std::endl;
+            logger.Log("Unknown fragment or urgent flag");
+            //std::cerr << "Unknown fragment or urgent flag"<< std::endl;
         }
 
         // Assuming payload follows the IP header
@@ -580,28 +775,64 @@ namespace DataCollection
                 else
                 {
                     datapoint.hot = 0;
-                }
+                }                
 
                 // Check for additional conditions based on service type
                 if (datapoint.service == "ssh" || datapoint.service == "telnet" || datapoint.service == "ftp")
                 {
-                    // Check for failed login attempts
-                    if (payloadString.find("Failed password") != std::string::npos)
+                    for (const auto& connection : connectionsTable)
                     {
-                        datapoint.num_failed_logins++;
-                    }
+                        if (connection.dport == packet.dest_port || connection.sport == packet.source_port)
+                        {
+                            // Check for failed login attempts
+                            if (connection.payloadString == "Failed password" && payloadString.find("Failed password") != std::string::npos)
+                            {
+                                datapoint.num_failed_logins++;
+                            }
+
+                            // Check for compromised conditions (example: detecting suspicious commands)
+                            if (connection.payloadString == "rm -rf /" && payloadString.find("rm -rf /") != std::string::npos)
+                            {
+                                datapoint.num_compromised++;
+                            }
+
+                            // Check for root accesses
+                            if (connection.payloadString == "root access" && payloadString.find("root access") != std::string::npos)
+                            {
+                                datapoint.num_root++;
+                            }
+
+                            // Check for file creations
+                            if (connection.payloadString == "STOR" && payloadString.find("STOR ") != std::string::npos)
+                            {
+                                datapoint.num_file_creations++;
+                            }
+
+                            // Check for shell prompts
+                            if (connection.payloadString == "sh" && payloadString.find("sh") != std::string::npos)
+                            {
+                                datapoint.num_shells++;
+                            }
+
+                            // Check for operations on access control files
+                            if (connection.payloadString == "chmod" && payloadString.find("chmod") != std::string::npos || payloadString.find("chown") != std::string::npos)
+                            {
+                                datapoint.num_access_files++;
+                            }
+
+                            // Check for outbound commands in an FTP session
+                            if (connection.payloadString == "PORT" && payloadString.find("PORT") != std::string::npos || payloadString.find("PASV") != std::string::npos)
+                            {
+                                datapoint.num_outbound_cmds++;
+                            }
+                        }
+                    }                    
 
                     // Check for successful login
                     if (payloadString.find("Accepted password") != std::string::npos)
                     {
                         datapoint.logged_in = 1;
-                    }
-
-                    // Check for compromised conditions (example: detecting suspicious commands)
-                    if (payloadString.find("rm -rf /") != std::string::npos)
-                    {
-                        datapoint.num_compromised++;
-                    }
+                    }                    
 
                     // Check for root shell
                     if (payloadString.find("root shell") != std::string::npos)
@@ -613,37 +844,7 @@ namespace DataCollection
                     if (payloadString.find("su ") != std::string::npos)
                     {
                         datapoint.su_attempted = 1;
-                    }
-
-                    // Check for root accesses
-                    if (payloadString.find("root access") != std::string::npos)
-                    {
-                        datapoint.num_root++;
-                    }
-
-                    // Check for file creations
-                    if (payloadString.find("STOR ") != std::string::npos)
-                    {
-                        datapoint.num_file_creations++;
-                    }
-
-                    // Check for shell prompts
-                    if (payloadString.find("sh") != std::string::npos)
-                    {
-                        datapoint.num_shells++;
-                    }
-
-                    // Check for operations on access control files
-                    if (payloadString.find("chmod") != std::string::npos || payloadString.find("chown") != std::string::npos)
-                    {
-                        datapoint.num_access_files++;
-                    }
-
-                    // Check for outbound commands in an FTP session
-                    if (payloadString.find("PORT") != std::string::npos || payloadString.find("PASV") != std::string::npos)
-                    {
-                        datapoint.num_outbound_cmds++;
-                    }
+                    }                  
 
                     // Check for hot login (example: detecting root or admin logins)
                     if (payloadString.find("root") != std::string::npos || payloadString.find("admin") != std::string::npos)
@@ -657,345 +858,166 @@ namespace DataCollection
                         datapoint.is_guest_login = 1;
                     }
                 }
+                // update connection payload string
+                connection.payloadString = payloadString;
             }
             catch (const std::exception& e)
             {
                 // Handle the exception (e.g., invalid memory access)
-                std::cerr << "Error reading payload memory: " << e.what() << std::endl;
+                logger.Log("Error reading payload memory: " +  std::string(e.what()));
+                //std::cerr << "Error reading payload memory: " << e.what() << std::endl;
             }
         }
         else
         {
-            std::cerr << "Invalid payload" << std::endl;
+            logger.Log("Invalid payload");
+            //std::cerr << "Invalid payload" << std::endl;
         }
 
-        // Increment count for each connection to the same destination host
-        int totalDstHostConnections = 0;
+        // connections to the same destination host as the current connection in thre past two seconds
+        std::lock_guard<std::mutex> readLock(connectionsMutex);
+        int count = countConnectionsToSameDestination(packet, connectionsTable, connectionsTable.size());
 
-        // Total connections to the same service (port number)
-        int totalSrvConnections = 0;
+        std::lock_guard<std::mutex> readLock1(connectionsMutex1);
+        int srv_count = countConnectionsToSameService(packet, connectionsTable, connectionsTable.size());
 
-        // Total connections in the connectionstable
+        datapoint.count = count;
+        datapoint.srv_count = srv_count;        
+
+        connection.timestamp = packet.timestamp;
+
+        int serror = 0;
+        int rerror = 0;
+        int same_srv = 0; // same service
+        int diff_srv = 0; // different services
+        int diff_dest = 0; // different destinations
+        int samedsthostno = 0; //same destination host
+        int sameportno = 0; // connections with same port
+        int samesourceport = 0; // same source port
         int totalConnections = 0;
-
-        // Total connections to different destination hosts
-        int totalDifferentHostConnections = 0;
-
-        // Connections that have activated the flags
-        int totalConnectionsActiveFlag = 0;
-
-        int srvSerrorCount = 0;
-        int rerrorCount = 0;
-        int srvRerrorCount = 0;
-
-        int dstHostDiffSrvCount = 0;
-        int dstHostSameSrcPortCount = 0;
-        int dstHostSrvDiffHostCount = 0;
-        int dstHostSerrorCount = 0;
-        int dstHostSrvSerrorCount = 0;
-        int dstHostRerrorCount = 0;
-        int dstHostSrvRerrorCount = 0;
-
-        int totalDstHostCount = 0;
-        int totalDstHostSrvCount = 0;
 
         // Iterate through the connectionTable vector
         for (const auto& connection : connectionsTable)
         {
             // Increment totalConnections
             totalConnections++;
+            in6_addr emptyipv6;
+            in_addr emptyipv4;
 
-            // Check if the denominator is not zero before division
-            if (totalDstHostConnections != 0)
-            {
-                // Calculate Srv_count: The ratio of connections having the same destination host and port to total connections
-                datapoint.srv_count = totalConnectionsActiveFlag / totalDstHostConnections;
-            }
-            else
-            {
-                // Handle division by zero error
-                datapoint.srv_count = 0.0;
-            }
+            memset(&emptyipv6, 0, sizeof(in6_addr));
+            memset(&emptyipv4, 0, sizeof(in_addr));
 
-            if (totalConnections != 0)
-            {
-                // Calculate Same_srv_rate: The percentage of connections that were to the same service
-                datapoint.same_srv_rate = (totalSrvConnections / static_cast<double>(totalConnections));
-
-                // Calculate Diff_srv_rate: The percentage of connections that were to different services
-                datapoint.diff_srv_rate = ((totalConnections - totalSrvConnections) / static_cast<double>(totalConnections));
-
-                // Calculate Srv_diffhost rate: The percentage of connections that were to different destination machines
-                datapoint.srv_diff_host_rate = (totalDifferentHostConnections / static_cast<double>(totalSrvConnections));
-
-                // Calculate Dst_host_same srv_rate: The percentage of connections that were to the same service
-                if (datapoint.dst_host_count != 0)
-                {
-                    datapoint.dst_host_same_srv_rate = (datapoint.dst_host_srv_count / static_cast<double>(datapoint.dst_host_count));
-                }
-                else
-                {
-                    // Handle division by zero error
-                    datapoint.dst_host_same_srv_rate = 0.0;
-                }
-            }
-            else
-            {
-                // Handle division by zero error
-                datapoint.same_srv_rate = 0.0;
-                datapoint.diff_srv_rate = 0.0;
-                datapoint.srv_diff_host_rate = 0.0;
-                datapoint.dst_host_same_srv_rate = 0.0;
-            }
-
-            // Check if the destination host is the same
             if (connection.dport == packet.dest_port)
             {
-                totalDstHostConnections++;
-
-                // Calculate Dst_host_diff_srv_rate
-                if (connection.dport == packet.dest_port && connection.sport != packet.source_port)
+                if (connection.flags == reinterpret_cast <u_char>("SF") || connection.flags == reinterpret_cast <u_char>("SO"))
                 {
-                    dstHostDiffSrvCount++;
+                    serror++;
                 }
 
-                // Calculate Dst_host_same_src_port_rate
-                if (connection.dport == packet.dest_port && connection.sport == packet.source_port)
+                if (connection.flags == reinterpret_cast<u_char>("REJ"))
                 {
-                    dstHostSameSrcPortCount++;
+                    rerror++;
                 }
-
-                // Calculate Dst_host_srv_diff_host_rate
-                if (packet.ip_src.S_un.S_addr && packet.ip_dst.S_un.S_addr)
-                {
-                    if (connection.dport == packet.dest_port && connection.ip_dst.S_un.S_addr != packet.ip_dst.S_un.S_addr)
-                    {
-                        dstHostSrvDiffHostCount++;
-                    }
-                }
-                else
-                {
-                    if (connection.dport == packet.dest_port && connection.ip6_dst.u.Byte != packet.ip6_dst.u.Byte)
-                    {
-                        dstHostSrvDiffHostCount++;
-                    }
-                }
-                
-
-                // Calculate Dst_host_serror_rate
-                if (connection.dport == packet.dest_port && !connection.flags == 0 && (connection.flags == reinterpret_cast < u_char>("SF") || connection.flags == reinterpret_cast < u_char>("REJ")))
-                {
-                    dstHostSerrorCount++;
-                }
-
-                // Calculate Dst_host_srv_serror_rate
-                if (connection.dport == packet.dest_port && !connection.flags == 0 && (connection.flags == reinterpret_cast < u_char>("SF") || connection.flags == reinterpret_cast < u_char>("REJ")))
-                {
-                    dstHostSrvSerrorCount++;
-                }
-
-                // Calculate Dst_host_rerror_rate
-                if (connection.dport == packet.dest_port && !connection.flags == 0 && connection.flags == reinterpret_cast < u_char>("REJ"))
-                {
-                    dstHostRerrorCount++;
-                }
-
-                // Calculate Dst_host_srv_rerror_rate
-                if (connection.dport == packet.dest_port && !connection.flags == 0 && connection.flags == reinterpret_cast < u_char>("REJ"))
-                {
-                    dstHostSrvRerrorCount++;
-                }
-
-                // Update totalDstHostConnections
-                totalDstHostConnections++;
 
                 if (connection.dport == packet.dest_port)
                 {
-                    // Your existing logic for counting srv connections, etc.
+                    same_srv++;
+                }
 
-                    // Update totalDstHostCount
-                    totalDstHostCount++;
-
-                    if (connection.sport == packet.dest_port)
+                if (memcmp(&connection.ip6_dst, &emptyipv6, sizeof(in6_addr)) != 0 && memcmp(&packet.ip6_dst, &emptyipv6, sizeof(in6_addr)) != 0)
+                {
+                    if (memcmp(&connection.ip6_dst, &packet.ip6_dst, sizeof(in6_addr)) != 0)
                     {
-                        // Update totalDstHostSrvCount
-                        totalDstHostSrvCount++;
+                        diff_dest++;
                     }
-                }
-            }
-
-            // Check if the service (port number) is the same
-            if (connection.dport == packet.dest_port)
-            {
-                totalSrvConnections++;
-
-                // Check if the connection has activated flags
-                if (!connection.flags == 0)
-                {
-                    totalConnectionsActiveFlag++;
-                }
-
-                // Check if the connection has activated flags and match the specified conditions
-                if (connection.flags == reinterpret_cast < u_char>("SF") || connection.flags == reinterpret_cast < u_char>("SO"))
-                {
-                    srvSerrorCount++;
-                }
-
-                // Check if the connection has activated flags and match the specified conditions
-                if (packet.ip_src.S_un.S_addr && packet.ip_dst.S_un.S_addr)
-                {
-                    if (connection.ip_src.S_un.S_addr == packet.ip_src.S_un.S_addr && connection.sport == packet.source_port && connection.flags == reinterpret_cast <u_char>("REJ"))
+                    else if (memcmp(&connection.ip6_dst, &packet.ip6_dst, sizeof(in6_addr)) == 0)
                     {
-                        rerrorCount++;
+                        samedsthostno++;
                     }
                 }
                 else
                 {
-                    if (connection.ip6_src.u.Byte == packet.ip6_src.u.Byte && connection.sport == packet.source_port && connection.flags == reinterpret_cast <u_char>("REJ"))
+                    if (memcmp(&connection.ip_dst, &packet.ip_dst, sizeof(in_addr))  != 0)
                     {
-                        rerrorCount++;
+                        diff_dest++;
+                    }
+                    else if (memcmp(&connection.ip_dst, &packet.ip_dst, sizeof(in_addr)) == 0)
+                    {
+                        samedsthostno++;
                     }
                 }
 
-                // Check if the connection has activated flags and match the specified conditions
-                if (connection.flags == reinterpret_cast < u_char>("REJ"))
+                if (connection.sport == packet.source_port && connection.dport == packet.dest_port)
                 {
-                    srvRerrorCount++;
+                    sameportno++;
                 }
+
+                if (connection.sport == packet.source_port)
+                {
+                    samesourceport++;
+                }
+                
             }
+            else
+            {
+                diff_srv++;
+            }
+            
         }
 
-        // Check if the denominator is not zero before division
-        if (totalDstHostConnections != 0)
+        if (count != 0)
         {
-            // Update packet attributes
-            datapoint.dst_host_diff_srv_rate = (static_cast<double>(dstHostDiffSrvCount) / totalDstHostConnections);
-            datapoint.dst_host_same_src_port_rate = (static_cast<double>(dstHostSameSrcPortCount) / totalDstHostSrvCount);
-            datapoint.dst_host_srv_diff_host_rate = (static_cast<double>(dstHostSrvDiffHostCount) / totalDstHostSrvCount);
-            datapoint.dst_host_serror_rate = (static_cast<double>(dstHostSerrorCount) / totalDstHostCount);
-            datapoint.dst_host_srv_serror_rate = (static_cast<double>(dstHostSrvSerrorCount) / totalDstHostSrvCount);
-            datapoint.dst_host_rerror_rate = (static_cast<double>(dstHostRerrorCount) / totalDstHostCount);
-            datapoint.dst_host_srv_rerror_rate = (static_cast<double>(dstHostSrvRerrorCount) / totalDstHostSrvCount);
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.dst_host_diff_srv_rate = 0.0;
-            datapoint.dst_host_same_src_port_rate = 0.0;
-            datapoint.dst_host_srv_diff_host_rate = 0.0;
-            datapoint.dst_host_serror_rate = 0.0;
-            datapoint.dst_host_srv_serror_rate = 0.0;
-            datapoint.dst_host_rerror_rate = 0.0;
-            datapoint.dst_host_srv_rerror_rate = 0.0;
+            datapoint.serror_rate = std::round((static_cast<double>(serror) / count) * 100.0) / 100.0;
+            datapoint.rerror_rate = std::round((static_cast<double>(rerror) / count) * 100.0) / 100.0;
+            datapoint.same_srv_rate = std::round((static_cast<double>(same_srv) / count) * 100.0) / 100.0;
+            datapoint.diff_srv_rate = std::round((static_cast<double>(diff_srv) / count) * 100.0) / 100.0;
         }
 
-        // Update packet attributes
-        datapoint.count = totalDstHostConnections;
-
-        // Increment srv_count for each connection to the same service
-        datapoint.srv_count = totalSrvConnections;
-
-        // Calculate Srv_count: The ratio of connections having the same destination host and port to total connections
-        if (totalDstHostConnections != 0)
+        if (srv_count != 0)
         {
-            datapoint.srv_count = totalConnectionsActiveFlag / totalDstHostConnections;
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.srv_count = 0.0;
+            datapoint.srv_serror_rate = std::round((static_cast<double>(serror) / srv_count) * 100.0) / 100.0;
+            datapoint.srv_rerror_rate = std::round((static_cast<double>(rerror) / srv_count) * 100.0) / 100.0;
+            datapoint.srv_diff_host_rate = std::round((static_cast<double>(diff_dest) / srv_count) * 100.0) / 100.0;
         }
 
-        // Calculate Same_srv_rate: The percentage of connections that were to the same service
-        if (totalConnections != 0)
+        datapoint.dst_host_count = samedsthostno;
+
+        if (samedsthostno != 0)
         {
-            datapoint.same_srv_rate = (totalSrvConnections / static_cast<double>(totalConnections));
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.same_srv_rate = 0.0;
+            datapoint.dst_host_same_srv_rate = std::round((static_cast<double>(srv_count) / samedsthostno) * 100.0) / 100.0;
+            datapoint.dst_host_diff_srv_rate = std::round((static_cast<double>(diff_srv) / samedsthostno) * 100.0) / 100.0;
         }
 
-        // Calculate Diff_srv_rate: The percentage of connections that were to different services
-        if (totalConnections != 0)
+        if (samesourceport != 0)
         {
-            datapoint.diff_srv_rate = ((totalConnections - totalSrvConnections) / static_cast<double>(totalConnections));
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.diff_srv_rate = 0.0;
+            datapoint.dst_host_same_src_port_rate = std::round((static_cast<double>(sameportno) / samesourceport) * 100.0) / 100.0;
         }
 
-        // Calculate Srv_diffhost rate: The percentage of connections that were to different destination machines
-        if (totalSrvConnections != 0)
+        if (sameportno != 0)
         {
-            datapoint.srv_diff_host_rate = (totalDifferentHostConnections / static_cast<double>(totalSrvConnections));
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.srv_diff_host_rate = 0.0;
+            datapoint.dst_host_srv_diff_host_rate = std::round((static_cast<double>(diff_dest) / sameportno) * 100.0) / 100.0;
+            datapoint.dst_host_srv_serror_rate = std::round((static_cast<double>(serror) / sameportno) * 100.0) / 100.0;
+            datapoint.dst_host_srv_rerror_rate = std::round((static_cast<double>(rerror) / sameportno) * 100.0) / 100.0;
         }
 
-        // Calculate Dst_host_count: Number of connections having the same destination host IP address
-        datapoint.dst_host_count = totalDstHostConnections;
-
-        // Calculate Dst_hostsrv count: Number of connections having the same port number
-        datapoint.dst_host_srv_count = totalSrvConnections;
-
-        // Calculate Dst_host_same srv_rate: The percentage of connections that were to the same service
-        if (datapoint.dst_host_count != 0)
+        if (samedsthostno != 0)
         {
-            datapoint.dst_host_same_srv_rate = (datapoint.dst_host_srv_count / static_cast<double>(datapoint.dst_host_count));
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.dst_host_same_srv_rate = 0.0;
-        }
-
-        // Calculate Srv_serror_rate: The percentage of connections that have activated the flag s0, s1, s2, or s3, among the connections aggregated in srv_count
-        // (Assuming s0, s1, s2, s3 are flags indicating errors in the network traffic)
-        if (totalSrvConnections != 0)
-        {
-            datapoint.srv_serror_rate = srvSerrorCount / static_cast<double>(totalSrvConnections);
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.srv_serror_rate = 0.0;
-        }
-
-        // Calculate Rerror_rate: The percentage of connections that have activated the flag REJ, among the connections aggregated in count
-        // (Assuming REJ is a flag indicating rejection in the network traffic)
-        if (totalConnections != 0)
-        {
-            datapoint.rerror_rate = rerrorCount / static_cast<double>(totalConnections);
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.rerror_rate = 0.0;
-        }
-
-        // Calculate Srv_rerror_rate: The percentage of connections that have activated the flag REJ, among the connections aggregated in srv_count
-        // (Assuming REJ is a flag indicating rejection in the network traffic)
-        if (totalSrvConnections != 0)
-        {
-            datapoint.srv_rerror_rate = srvRerrorCount / static_cast<double>(totalSrvConnections);
-        }
-        else
-        {
-            // Handle division by zero error
-            datapoint.srv_rerror_rate = 0.0;
+            datapoint.dst_host_serror_rate = std::round((static_cast<double>(serror) / samedsthostno) * 100.0) / 100.0;
+            datapoint.dst_host_rerror_rate = std::round((static_cast<double>(rerror) / samedsthostno) * 100.0) / 100.0;
         }
 
         std::lock_guard<std::mutex> lock(connTable);
         connectionsTable.push_back(connection);
 
+        std::lock_guard<std::mutex> lock1(datapointMutex);
+        datapoints.push_back(datapoint);
+
         return datapoint;
+    }
+
+    std::vector<Datapoint> PacketCollector::GetDatapoints()
+    {
+        return datapoints;
     }
 
     // signal handler
@@ -1015,28 +1037,30 @@ namespace DataCollection
     // Start packet capture method
     void PacketCollector::StartCapture()
     {
-        // Ensure that only one thread can enter this method at a time
-        std::lock_guard<std::mutex> lock(instanceMutex);
-
-        // register the signal handler function to handle the keyboard interrupt
-        std::signal(SIGINT, &StaticSignalHandler);
-
-        // Check if packet capturing is in progress
-        if (isCapturing.load(std::memory_order_relaxed))
         {
-            logger.Log("Already capturing\n");
-            std::cerr << "Already capturing\n" << std::endl;
-            return;
-        }
+            // Ensure that only one thread can enter this method at a time
+            std::lock_guard<std::mutex> lock(instanceMutex);
 
-        // Initialize the barrier to ensure all threads start capturing together
-        startBarrier.store(0, std::memory_order_relaxed);
+            // register the signal handler function to handle the keyboard interrupt
+            std::signal(SIGINT, &StaticSignalHandler);
 
-        // Start a capture thread for each network interface
-        for (auto& iface : networkInterfaces)
-        {
-            threads.emplace_back([this, &iface] { CapturePackets(iface); });
-            startBarrier.fetch_add(1, std::memory_order_relaxed); // Increment the barrier count
+            // Check if packet capturing is in progress
+            if (isCapturing.load(std::memory_order_relaxed))
+            {
+                logger.Log("Already capturing\n");
+                //std::cerr << "Already capturing\n" << std::endl;
+                return;
+            }
+
+            // Initialize the barrier to ensure all threads start capturing together
+            startBarrier.store(0, std::memory_order_relaxed);
+
+            // Start a capture thread for each network interface
+            for (auto& iface : networkInterfaces)
+            {
+                threads.emplace_back([this, &iface] { CapturePackets(iface); });
+                startBarrier.fetch_add(1, std::memory_order_relaxed); // Increment the barrier count
+            }
         }
 
         // Wait for all threads to be ready to capture
@@ -1067,12 +1091,12 @@ namespace DataCollection
             startBarrier.fetch_sub(1, std::memory_order_relaxed); // Release the thread from the barrier
             return;
         }
+
+        // Capture start time
+        std::chrono::system_clock::time_point captureStartTime = std::chrono::system_clock::now();
         
         while (isCapturing.load(std::memory_order_relaxed))
         {
-            // Capture start time
-            std::chrono::system_clock::time_point captureStartTime = std::chrono::system_clock::now();
-
             struct pcap_pkthdr header;
             const u_char* packetData = pcap_next(pcapHandle, &header);
 
@@ -1092,27 +1116,6 @@ namespace DataCollection
             std::lock_guard<std::mutex> lock(capturedPacketsMutex);
             capturedPackets[iface.interfaceName] = capturedPacketsArr;
         }
-    }
-
-    // converting bytes to uint32_t
-    uint32_t PacketCollector::bytesToUint32(const uint8_t* bytes) 
-    {
-        return (static_cast<uint32_t>(bytes[0]) << 24) |
-            (static_cast<uint32_t>(bytes[1]) << 16) |
-            (static_cast<uint32_t>(bytes[2]) << 8) |
-            static_cast<uint32_t>(bytes[3]);
-    }
-
-    std::string PacketCollector::ConvertIPv6AddressToString(const uint8_t* ipv6Address) {
-        std::stringstream ss;
-        ss << std::hex << std::setfill('0');
-        for (int i = 0; i < 16; i += 2) {
-            ss << std::setw(2) << static_cast<unsigned>(ipv6Address[i]) << std::setw(2) << static_cast<unsigned>(ipv6Address[i + 1]);
-            if (i < 14) {
-                ss << ':';
-            }
-        }
-        return ss.str();
     }
 
     // Process the packet collected
@@ -1242,7 +1245,9 @@ namespace DataCollection
                     }
                     else
                     {
-                        std::cerr << "Invalid protocol"<< std::endl;
+                        packet.protocol_type = "other";
+                        logger.Log("Invalid protocol");
+                        //std::cerr << "Invalid protocol"<< std::endl;
                     }
 
                     packet.ip_ttl = ipHeader->ip_ttl;
@@ -1325,13 +1330,16 @@ namespace DataCollection
                     }
                     else
                     {
-                        std::cerr << "Invalid protocol" << std::endl;
+                        packet.protocol_type = "other";
+                        logger.Log("Invalid protocol");
+                        //std::cerr << "Invalid protocol" << std::endl;
                     }
 
                 }
                 else
                 {
-                    std::cerr << "Unknown version" << std::endl;
+                    logger.Log("Unknown version");
+                    //std::cerr << "Unknown version" << std::endl;
                 }
             }
             else if (linkType == LinkType::WIFIFRAME)
@@ -1443,7 +1451,9 @@ namespace DataCollection
                     }
                     else
                     {
-                        std::cerr << "Invalid protocol" << std::endl;
+                        packet.protocol_type = "other";
+                        logger.Log("Invalid protocol");
+                        //std::cerr << "Invalid protocol" << std::endl;
                     }
                 }
                 else if (ethType == 0x86DD)
@@ -1556,25 +1566,42 @@ namespace DataCollection
                     }
                     else
                     {
-                        std::cerr << "Invalid protocol" << std::endl;
+                        packet.protocol_type = "other";
+                        logger.Log("Invalid protocol");
+                        //std::cerr << "Invalid protocol" << std::endl;
                     }
                 }
                 else
                 {
-                    std::cerr << "Unknown version" << std::endl;
+                    logger.Log("Unknown version");
+                    //std::cerr << "Unknown version" << std::endl;
                 }
             }
             else
             {
-                std::cerr << "Unsupported link layer protocol" << std::endl;
+                logger.Log("Unsupported link layer protocol\n");
+                //std::cerr << "Unsupported link layer protocol" << std::endl;
             }
             AttributeExtractor(packetData, packet, header, ipHeader, connectionTimeInSeconds, headerSize, ipHeaderLength, srcBytes, dstBytes);
         }
         else
         {
             logger.Log("An error occurred\n");
-            std::cerr << "An error occurred\n" << std::endl;
+            //std::cerr << "An error occurred\n" << std::endl;
         }
+
+        std::string interfaceId = iface.interfaceName;
+
+        // Store the packet details in the shared vector
+        std::lock_guard<std::mutex> lock(capturedPacketsMutex);
+
+        if (capturedPackets.find(interfaceId) == capturedPackets.end())
+        {
+            // If the interface doesn't exist in the map, create it
+            capturedPackets[interfaceId] = std::vector<Packet>();
+        }
+
+        capturedPacketsArr.push_back(packet);
 
         pcap_close(handle);
     }
@@ -1933,7 +1960,7 @@ namespace DataCollection
             }
 
             // parse the data point features
-            if (fields.size() == 41)
+            if (fields.size() == 42)
             {
                 // Encode protocol type
                 if (protocolType.find(fields[1]) == protocolType.end())
@@ -1957,7 +1984,7 @@ namespace DataCollection
                 data->AppendToFeatureVector(flag[fields[3]]);
 
                 // parse and convert each field to a double and append it to the feature vector
-                for (size_t i = 4; i < fields.size(); i++)
+                for (size_t i = 4; i < fields.size() - 1; i++)
                 {
                     try
                     {
@@ -2098,7 +2125,6 @@ namespace DataCollection
     std::shared_ptr<std::vector<std::shared_ptr<Data>>> DataHandler::GetValidationData()
     {
         return validationData;
-    }
-   
+    }   
 
 }

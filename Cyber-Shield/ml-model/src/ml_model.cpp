@@ -137,7 +137,7 @@ namespace PacketAnalyzer
 			exit(1);
 		}
 
-		for (unsigned i = 0; i < queryPoint->GetFeatureVectorSize(); i++)
+		for (int i = 0; i < queryPoint->GetFeatureVectorSize(); i++)
 		{
 			if (metric == DistanceMetric::EUCLID)
 			{
