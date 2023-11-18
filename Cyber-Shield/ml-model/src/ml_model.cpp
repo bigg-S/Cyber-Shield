@@ -239,7 +239,7 @@ namespace PacketAnalyzer
 
 	double KNN::CalculateSilhouetteScore(std::shared_ptr<DataCollection::Data> queryPoint)
 	{
-		const int numNeighbors = neighbors->size();
+		const size_t numNeighbors = neighbors->size();
 
 		if (numNeighbors == 0 || numNeighbors >= trainingData->size()) {
 			std::cerr << "Error: Invalid number of neighbors for silhouette score calculation." << std::endl;

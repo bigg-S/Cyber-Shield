@@ -338,6 +338,7 @@ namespace DataCollection
     {
     private:
         std::ofstream logFile;
+        std::mutex logFileMutex;
 
     public:
         NetworkLogger(const std::string& logFileName);
@@ -403,7 +404,7 @@ namespace DataCollection
         std::mutex connectionsMutex;
         std::mutex connectionsMutex1;
         std::mutex inspectMutex;
-
+        std::mutex logFile;
 
         std::condition_variable startCV;  //global condition variable for synchronization
 
@@ -417,7 +418,7 @@ namespace DataCollection
 
         NetworkLogger& logger;
 
-        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface, std::chrono::system_clock::time_point capturStartTime);
+        void ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface);
 
     public:
         PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, NetworkLogger& logger);
@@ -429,7 +430,7 @@ namespace DataCollection
         int CalculateConnectionTime(const std::vector<Connection>& connections, Packet);
         int countConnectionsToSameService(const Packet& currentConnection, std::vector<Connection>& connections, int numConnections);
         int countConnectionsToSameDestination(const Packet& currentConnection, std::vector<Connection>& connections, int numConnections);
-        Datapoint AttributeExtractor(const u_char*, Packet, const struct pcap_pkthdr&, const IP*, int, int, uint8_t, uint16_t, uint16_t);
+        Datapoint AttributeExtractor(const u_char*, Packet, const struct pcap_pkthdr&, const IP*, int, uint8_t, uint16_t, uint16_t);
         static void StaticSignalHandler(int signal); // static function to serve as an inermediary to call the non-static SignalHandler functio
         void SignalHandler(int signal);
         std::map<std::string, std::vector<Packet>> GetCapturedPackets();

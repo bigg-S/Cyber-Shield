@@ -24,6 +24,7 @@ namespace DataCollection
     {
         if (logFile.is_open())
         {
+            std::unique_lock<std::mutex> fileLock(logFileMutex);
             logFile << logMessage << std::endl;
         }
         else
@@ -261,14 +262,18 @@ namespace DataCollection
     {       
 
         // Check if numConnections is less than or equal to zero
-        if (numConnections <= 0) {
-            logger.Log("Error: Invalid numConnections");
+        if (numConnections <= 0) 
+        {
+            std::lock_guard<std::mutex> lock(logFile);
+            //logger.Log("Error: Invalid numConnections");
             return 0;  // or handle the error accordingly
         }
         
         // Check if connections vector is empty
-        if (connections.empty()) {
-            logger.Log("Error: Connections vector is empty");
+        if (connections.empty()) 
+        {
+            std::lock_guard<std::mutex> lock(logFile);
+            //logger.Log("Error: Connections vector is empty");
             return 0;  // or handle the error accordingly
         }
         
@@ -319,7 +324,8 @@ namespace DataCollection
                 else
                 {
                     // Handle parsing error for array element timestamp
-                    logger.Log("Error parsing timestamp for array element " + std::to_string(i));
+                    std::lock_guard<std::mutex> lock(logFile);
+                    //logger.Log("Error parsing timestamp for array element " + std::to_string(i));
                     //std::cerr << "Error parsing timestamp for array element " << i << std::endl;
                 }
             }
@@ -327,7 +333,8 @@ namespace DataCollection
         else
         {
             // Handle parsing error for current connection timestamp
-            logger.Log("Error parsing timestamp for the current connection");
+            std::lock_guard<std::mutex> lock(logFile);
+            //logger.Log("Error parsing timestamp for the current connection");
             //std::cerr << "Error parsing timestamp for the current connection" << std::endl;
         }
         
@@ -410,20 +417,23 @@ namespace DataCollection
                     else
                     {
                         // Handle parsing error for array element timestamp
-                        logger.Log("Error parsing timestamp for array element " + std::to_string(i) + ": " + connections[i].timestamp);
+                        std::lock_guard<std::mutex> lock(logFile);
+                        //logger.Log("Error parsing timestamp for array element " + std::to_string(i) + ": " + connections[i].timestamp);
                     }
                 }
             }
             else
             {
                 // Handle parsing error for current connection timestamp
-                logger.Log("Error parsing timestamp for the current connection");
+                std::lock_guard<std::mutex> lock(logFile);
+                //logger.Log("Error parsing timestamp for the current connection");
             }
         }
         else
         {
             // Handle the case where the connections vector is empty
-            logger.Log("Connections vector is empty");
+            std::lock_guard<std::mutex> lock(logFile);
+            //logger.Log("Connections vector is empty");
         }
 
         return connectionsToSameService;
@@ -479,11 +489,14 @@ namespace DataCollection
         return timeDifference;
     }
 
-    Datapoint PacketCollector::AttributeExtractor(const u_char* packetData, Packet packet, const struct pcap_pkthdr& header, const IP* ipHeader, int connectionTime, int headerSize, uint8_t ipHeaderLength, uint16_t srcBytes, uint16_t dstBytes)
+    Datapoint PacketCollector::AttributeExtractor(const u_char* packetData, Packet packet, const struct pcap_pkthdr& header, const IP* ipHeader, int headerSize, uint8_t ipHeaderLength, uint16_t srcBytes, uint16_t dstBytes)
     {
-         Datapoint datapoint;
+        Datapoint datapoint;
         // store the connection in the connection table
-        Connection connection;        
+        Connection connection;
+
+        if (packet.flags == reinterpret_cast<u_char>("other") && packet.protocol_type == "other" || packet.flags == reinterpret_cast<u_char>("other") && packet.protocol_type.empty())
+            return datapoint;
 
         // Extract IP header fields
         datapoint.duration = CalculateConnectionTime(connectionsTable, packet);
@@ -545,6 +558,15 @@ namespace DataCollection
                 break;
             case 43:
                 datapoint.service = "whois";
+                break;
+            case 79:
+                datapoint.service = "finger";
+                break;
+            case 87:
+                datapoint.service = "link";
+                break;
+            case 530:
+                datapoint.service = "courier";
                 break;
             default:
                 datapoint.service = "other";
@@ -644,7 +666,7 @@ namespace DataCollection
             }
             else
             {
-                datapoint.flag = "other"; // If no active flag is set
+                datapoint.flag = "SO"; // If no active flag is set
             }
 
             // Additional logic for specific flags
@@ -677,7 +699,25 @@ namespace DataCollection
         }
         else if (datapoint.protocol_type == "udp")
         {
-            datapoint.flag = "N/A"; // no flags in UDP
+            const u_char* udpHeader = reinterpret_cast<const u_char*>(ipHeader) + ipHeaderLength; // Offset for the start of the UDP header
+            uint16_t udpFlags = ntohs(*reinterpret_cast<const uint16_t*>(udpHeader + 6)); // Offset for UDP flags (6 bytes into the header)
+
+            // Extract specific UDP flags
+            bool udpFlag1 = udpFlags & 0x8000; // Most significant bit
+            bool udpFlag2 = udpFlags & 0x4000; // Second most significant bit
+
+            // Switch through the flags directly
+            if (udpFlag1)
+            {
+                datapoint.flag = "SF";
+                connection.flags = reinterpret_cast<u_char>("SF");
+                 
+            }
+            else
+            {
+                datapoint.flag = "RSTO";
+                connection.flags = reinterpret_cast<u_char>("RSTO");                 
+            }
         }
         else if (datapoint.protocol_type == "icmp")
         {
@@ -685,28 +725,29 @@ namespace DataCollection
             uint8_t icmpType = (icmpHeader != nullptr) ? icmpHeader[0] : 0;
 
             // Check the ICMP type to determine the active flag
-            switch (icmpType) {
+            switch (icmpType) 
+            {
             case 0:
-                datapoint.flag = "Echo Reply";
-                connection.flags = reinterpret_cast < u_char>("Echo Reply");
+                datapoint.flag = "SF"; // Echo Reply represents SF flag
+                connection.flags = reinterpret_cast<u_char>("SF");
                 break;
             case 3:
-                datapoint.flag = "Destination Unreachable";
-                connection.flags = reinterpret_cast < u_char>("Destination Unreachable");
+                datapoint.flag = "REJ"; // Destination Unreachable represents REJ flag
+                connection.flags = reinterpret_cast<u_char>("REJ");
                 break;
             case 8:
-                datapoint.flag = "Echo Request";
-                connection.flags = reinterpret_cast < u_char>("Echo Request");
+                datapoint.flag = "SF"; // Echo Request represents SF flag
+                connection.flags = reinterpret_cast<u_char>("SF");
                 break;
             default:
-                datapoint.flag = "other";
-                connection.flags = reinterpret_cast < u_char>("other");
+                datapoint.flag = "RSTO"; // "other" flag represents RSTO
+                connection.flags = reinterpret_cast<u_char>("RSTO");
             }
         }
         else
         {
-            datapoint.flag = "other"; // Handle other transport layer protocols
-            connection.flags = reinterpret_cast < u_char>("other");
+            datapoint.flag = "SF"; // Handle other transport layer protocols
+            connection.flags = reinterpret_cast < u_char>("SF");
         }
 
         in6_addr emptyipv6;
@@ -798,7 +839,8 @@ namespace DataCollection
         }
         else
         {
-            logger.Log("Unknown fragment or urgent flag");
+            std::lock_guard<std::mutex> lock(logFile);
+            //logger.Log("Unknown fragment or urgent flag");
             //std::cerr << "Unknown fragment or urgent flag"<< std::endl;
         }
 
@@ -913,13 +955,15 @@ namespace DataCollection
             catch (const std::exception& e)
             {
                 // Handle the exception (e.g., invalid memory access)
-                logger.Log("Error reading payload memory: " +  std::string(e.what()));
+                std::lock_guard<std::mutex> lock(logFile);
+                //logger.Log("Error reading payload memory: " +  std::string(e.what()));
                 //std::cerr << "Error reading payload memory: " << e.what() << std::endl;
             }
         }
         else
         {
-            logger.Log("Invalid payload");
+            std::lock_guard<std::mutex> lock(logFile);
+            //logger.Log("Invalid payload");
             //std::cerr << "Invalid payload" << std::endl;
         }
 
@@ -1066,12 +1110,14 @@ namespace DataCollection
 
         
         {
-            std::lock_guard<std::mutex> lock2(inspectMutex);
+            
             std::string fileName = "CSMLM.dat";
             try
             {
                 knn->LoadKNN(fileName);
                 std::cout << "Model Loaded successfully!" << std::endl;
+
+                std::lock_guard<std::mutex> lock2(inspectMutex);
                 knn->InspectDataPoint(dh->CreateDataInstance(datapoint.toCSVString()));
             }
             catch (const std::exception e)
@@ -1117,7 +1163,7 @@ namespace DataCollection
             // Check if packet capturing is in progress
             if (isCapturing.load(std::memory_order_relaxed))
             {
-                logger.Log("Already capturing\n");
+                //logger.Log("Already capturing\n");
                 //std::cerr << "Already capturing\n" << std::endl;
                 return;
             }
@@ -1154,16 +1200,13 @@ namespace DataCollection
 
         if (pcapHandle == nullptr) {
             std::string errorMsg = "Error: Failed to open network interface (" + iface.interfaceName + "): " + errbuf;
-            logger.Log(errorMsg);
+            //logger.Log(errorMsg);
             std::cerr << errorMsg << std::endl;
 
             pcap_close(pcapHandle);
             startBarrier.fetch_sub(1, std::memory_order_relaxed); // Release the thread from the barrier
             return;
         }
-
-        // Capture start time
-        std::chrono::system_clock::time_point captureStartTime = std::chrono::system_clock::now();
         
         while (isCapturing.load(std::memory_order_relaxed))
         {
@@ -1172,7 +1215,7 @@ namespace DataCollection
 
             if (packetData != nullptr)
             {
-                ProcessPacket(packetData, header, iface, captureStartTime);
+                ProcessPacket(packetData, header, iface);
             }
         }
 
@@ -1189,7 +1232,7 @@ namespace DataCollection
     }
 
     // Process the packet collected
-    void PacketCollector::ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface, std::chrono::system_clock::time_point captureStartTime)
+    void PacketCollector::ProcessPacket(const u_char* packetData, const struct pcap_pkthdr& header, const NetworkInterface& iface)
     {
         char errbuf[PCAP_ERRBUF_SIZE];
         pcap_t* handle = pcap_open_live(iface.interfaceName.c_str(), BUFSIZ, 1, 1000, errbuf);
@@ -1199,12 +1242,6 @@ namespace DataCollection
         // get the timestamp from when the packet was captured
         std::chrono::system_clock::time_point timestamp = std::chrono::system_clock::from_time_t(header.ts.tv_sec);
         timestamp += std::chrono::microseconds(header.ts.tv_sec);
-
-        // calculate the connection time
-        std::chrono::duration<double> connectionTime = timestamp - captureStartTime;
-
-        // convert connection time to seconds
-        int connectionTimeInSeconds = connectionTime.count();
 
         Packet packet;
 
@@ -1316,7 +1353,8 @@ namespace DataCollection
                     else
                     {
                         packet.protocol_type = "other";
-                        logger.Log("Invalid protocol");
+                        std::lock_guard<std::mutex> lock(logFile);
+                        //logger.Log("Invalid protocol");
                         //std::cerr << "Invalid protocol"<< std::endl;
                     }
 
@@ -1401,14 +1439,16 @@ namespace DataCollection
                     else
                     {
                         packet.protocol_type = "other";
-                        logger.Log("Invalid protocol");
+                        std::lock_guard<std::mutex> lock(logFile);
+                        //logger.Log("Invalid protocol");
                         //std::cerr << "Invalid protocol" << std::endl;
                     }
 
                 }
                 else
                 {
-                    logger.Log("Unknown version");
+                    std::lock_guard<std::mutex> lock(logFile);
+                    //logger.Log("Unknown version");
                     //std::cerr << "Unknown version" << std::endl;
                 }
             }
@@ -1522,7 +1562,8 @@ namespace DataCollection
                     else
                     {
                         packet.protocol_type = "other";
-                        logger.Log("Invalid protocol");
+                        std::lock_guard<std::mutex> lock(logFile);
+                        //logger.Log("Invalid protocol");
                         //std::cerr << "Invalid protocol" << std::endl;
                     }
                 }
@@ -1637,27 +1678,31 @@ namespace DataCollection
                     else
                     {
                         packet.protocol_type = "other";
-                        logger.Log("Invalid protocol");
+                        std::lock_guard<std::mutex> lock(logFile);
+                        //logger.Log("Invalid protocol");
                         //std::cerr << "Invalid protocol" << std::endl;
                     }
                 }
                 else
                 {
-                    logger.Log("Unknown version");
+                    std::lock_guard<std::mutex> lock(logFile);
+                    //logger.Log("Unknown version");
                     //std::cerr << "Unknown version" << std::endl;
                 }
             }
             else
             {
-                logger.Log("Unsupported link layer protocol\n");
+                std::lock_guard<std::mutex> lock(logFile);
+                //logger.Log("Unsupported link layer protocol\n");
                 //std::cerr << "Unsupported link layer protocol" << std::endl;
             }
             // create the machine learning model datapoint
-            AttributeExtractor(packetData, packet, header, ipHeader, connectionTimeInSeconds, headerSize, ipHeaderLength, srcBytes, dstBytes);
+            AttributeExtractor(packetData, packet, header, ipHeader, headerSize, ipHeaderLength, srcBytes, dstBytes);
         }
         else
         {
-            logger.Log("An error occurred\n");
+            std::lock_guard<std::mutex> lock(logFile);
+            //logger.Log("An error occurred\n");
             //std::cerr << "An error occurred\n" << std::endl;
         }
 
