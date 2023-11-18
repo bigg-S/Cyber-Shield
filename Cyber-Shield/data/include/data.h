@@ -17,6 +17,7 @@
 #include <mutex>
 #include <thread>
 #include <shared_mutex>
+#include <algorithm>
 
 #include <typeinfo>
 
@@ -129,41 +130,7 @@ namespace DataCollection
         unsigned short id;            // Identifier (used in some ICMP messages)
         unsigned short sequence;      // Sequence Number (used in some ICMP messages)
         // Additional fields depending on the ICMP message type
-    };
-
-    // For wi-fi frames
-    // Management frame header
-    struct ManagementFrameHeader 
-    {
-        uint16_t frameControl;
-        uint16_t duration;
-        uint8_t receiverAddress[6];
-        uint8_t transmitterAddress[6];
-        uint8_t destinationAddress[6];
-        uint16_t fragmentNumber : 4;
-        uint16_t sequenceNumber : 12;
-    };
-
-    // Control frame header
-    struct ControlFrameHeader 
-    {
-        uint16_t frameControl;
-        uint16_t duration;
-        uint8_t receiverAddress[6];
-        uint8_t transmitterAddress[6];
-    };
-
-    // Data frame header
-    struct DataFrameHeader 
-    {
-        uint16_t frameControl;
-        uint16_t duration;
-        uint8_t receiverAddress[6];
-        uint8_t transmitterAddress[6];
-        uint8_t destinationAddress[6];
-        uint16_t fragmentNumber : 4;
-        uint16_t sequenceNumber : 12;
-    };
+    };    
 
     // An item for the machine learning model
     struct Datapoint
@@ -209,6 +176,54 @@ namespace DataCollection
         double dst_host_srv_serror_rate = 0.0;
         double dst_host_rerror_rate = 0.0;
         double dst_host_srv_rerror_rate = 0.0;
+
+        std::string toCSVString() const
+        {
+            std::ostringstream oss;
+            oss << duration << ","
+                << protocol_type << ","
+                << service << ","
+                << flag << ","
+                << src_bytes << ","
+                << dst_bytes << ","
+                << land << ","
+                << wrong_fragment << ","
+                << urgent << ","
+                << hot << ","
+                << num_failed_logins << ","
+                << logged_in << ","
+                << num_compromised << ","
+                << root_shell << ","
+                << su_attempted << ","
+                << num_root << ","
+                << num_file_creations << ","
+                << num_shells << ","
+                << num_access_files << ","
+                << num_outbound_cmds << ","
+                << is_host_login << ","
+                << is_guest_login << ","
+                << count << ","
+                << srv_count << ","
+                << serror_rate << ","
+                << srv_serror_rate << ","
+                << rerror_rate << ","
+                << srv_rerror_rate << ","
+                << same_srv_rate << ","
+                << diff_srv_rate << ","
+                << srv_diff_host_rate << ","
+                << dst_host_count << ","
+                << dst_host_srv_count << ","
+                << dst_host_same_srv_rate << ","
+                << dst_host_diff_srv_rate << ","
+                << dst_host_same_src_port_rate << ","
+                << dst_host_srv_diff_host_rate << ","
+                << dst_host_serror_rate << ","
+                << dst_host_srv_serror_rate << ","
+                << dst_host_rerror_rate << ","
+                << dst_host_srv_rerror_rate;
+
+            return oss.str();
+        }
     };
 
     // Packet structure
@@ -377,6 +392,8 @@ namespace DataCollection
 
         std::vector<std::thread> threads;
 
+        bool isModelLoaded = false; // to control loading the model
+
         std::mutex capturedPacketsMutex;
         std::mutex instanceMutex;
         std::mutex startMutex;
@@ -385,6 +402,7 @@ namespace DataCollection
         std::mutex datapointMutex;
         std::mutex connectionsMutex;
         std::mutex connectionsMutex1;
+        std::mutex inspectMutex;
 
 
         std::condition_variable startCV;  //global condition variable for synchronization
@@ -405,13 +423,12 @@ namespace DataCollection
         PacketCollector(const std::vector<NetworkInterface>& networkInterfaces, NetworkLogger& logger);
         ~PacketCollector();
 
-        uint32_t bytesToUint32(const uint8_t* bytes);
         void StartCapture();
         void StopCapture();
         void CapturePackets(const NetworkInterface& iface);
+        int CalculateConnectionTime(const std::vector<Connection>& connections, Packet);
         int countConnectionsToSameService(const Packet& currentConnection, std::vector<Connection>& connections, int numConnections);
         int countConnectionsToSameDestination(const Packet& currentConnection, std::vector<Connection>& connections, int numConnections);
-        std::string ConvertIPv6AddressToString(const uint8_t* ipv6Address);
         Datapoint AttributeExtractor(const u_char*, Packet, const struct pcap_pkthdr&, const IP*, int, int, uint8_t, uint16_t, uint16_t);
         static void StaticSignalHandler(int signal); // static function to serve as an inermediary to call the non-static SignalHandler functio
         void SignalHandler(int signal);
@@ -510,10 +527,13 @@ namespace DataCollection
         void SaveDataHandler(std::string& fileName);
         void LoadDataHandler(std::string& fileName);
 
-        void ReadFeatureVector(std::string path);
+        std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> ReadFeatureVector(std::string path);
         void ReadFeatureLabels(std::string path);
         void SplitData();
         void CountClasses();
+
+        // convert datapoint string to a Data instance
+        std::shared_ptr<Data> CreateDataInstance(std::string);
 
         std::shared_ptr<std::vector<std::shared_ptr<Data>>> GetTrainingData();
         std::shared_ptr<std::vector<std::shared_ptr<Data>>> GetTestData();

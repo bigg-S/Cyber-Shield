@@ -1,4 +1,4 @@
-#include "data.h"
+#include "ml_model.h"
 
 namespace DataCollection
 {
@@ -430,14 +430,63 @@ namespace DataCollection
        
     }
 
+    int PacketCollector::CalculateConnectionTime(const std::vector<Connection>& connections, Packet packet)
+    {
+        // Function to convert timestamp strings to time_t
+        auto convertTimestampToTime = [](const std::string& timestamp) {
+            std::tm tm = {};
+            std::istringstream timestampStream(timestamp);
+            timestampStream >> std::get_time(&tm, "%a %b %d %H:%M:%S %Y");
+            return  tm;
+        };
+
+        // Function to find the time difference between two timestamps in seconds
+        auto getTimeDifference = [&convertTimestampToTime](const std::string& timestamp1, const std::string& timestamp2) {
+            std::tm time1 = convertTimestampToTime(timestamp1);
+            std::tm time2 = convertTimestampToTime(timestamp2);
+            return std::difftime(std::mktime(&time2), std::mktime(&time1));
+        };
+
+        std::vector<Connection> matchingConnections;
+
+        // Find all connections with the same port as the target port
+        for (const auto& connection : connections) 
+        {
+            if (connection.dport == packet.dest_port) 
+            {
+                matchingConnections.push_back(connection);
+            }
+        }
+
+        if (matchingConnections.empty()) 
+        {
+            std::cerr << "No connections found with port " << packet.dest_port << std::endl;
+            return 0.0;
+        }
+
+        // Find the connection with the highest timestamp
+        auto maxTimestampConnection = std::max_element(matchingConnections.begin(), matchingConnections.end(), [](const Connection& a, const Connection& b) {
+            return a.timestamp < b.timestamp;
+            });
+
+        // Find the connection with the smallest timestamp
+        auto minTimestampConnection = std::min_element(matchingConnections.begin(), matchingConnections.end(), [](const Connection& a, const Connection& b) {
+            return a.timestamp < b.timestamp;
+            });
+
+        double timeDifference = getTimeDifference(minTimestampConnection->timestamp, maxTimestampConnection->timestamp);
+
+        return timeDifference;
+    }
+
     Datapoint PacketCollector::AttributeExtractor(const u_char* packetData, Packet packet, const struct pcap_pkthdr& header, const IP* ipHeader, int connectionTime, int headerSize, uint8_t ipHeaderLength, uint16_t srcBytes, uint16_t dstBytes)
     {
          Datapoint datapoint;
         // store the connection in the connection table
-        Connection connection;
+        Connection connection;        
 
         // Extract IP header fields
-        datapoint.duration = connectionTime - 1699;
+        datapoint.duration = CalculateConnectionTime(connectionsTable, packet);
 
         if (packet.protocol_type.empty())
         {
@@ -1012,6 +1061,27 @@ namespace DataCollection
         std::lock_guard<std::mutex> lock1(datapointMutex);
         datapoints.push_back(datapoint);
 
+        std::shared_ptr<PacketAnalyzer::KNN> knn = std::make_shared<PacketAnalyzer::KNN>(3);
+        std::shared_ptr<DataCollection::DataHandler> dh = std::make_shared<DataCollection::DataHandler>();       
+
+        
+        {
+            std::lock_guard<std::mutex> lock2(inspectMutex);
+            std::string fileName = "CSMLM.dat";
+            try
+            {
+                knn->LoadKNN(fileName);
+                std::cout << "Model Loaded successfully!" << std::endl;
+                knn->InspectDataPoint(dh->CreateDataInstance(datapoint.toCSVString()));
+            }
+            catch (const std::exception e)
+            {
+                std::cerr << "Error loading model: " << e.what() << std::endl;
+            }
+            
+        }
+        
+
         return datapoint;
     }
 
@@ -1582,6 +1652,7 @@ namespace DataCollection
                 logger.Log("Unsupported link layer protocol\n");
                 //std::cerr << "Unsupported link layer protocol" << std::endl;
             }
+            // create the machine learning model datapoint
             AttributeExtractor(packetData, packet, header, ipHeader, connectionTimeInSeconds, headerSize, ipHeaderLength, srcBytes, dstBytes);
         }
         else
@@ -1922,14 +1993,89 @@ namespace DataCollection
         ia >> *this;
     }
 
-    void DataHandler::ReadFeatureVector(std::string path)
+    std::shared_ptr<DataCollection::Data> DataHandler::CreateDataInstance(std::string line)
+    {
+        std::shared_ptr<Data> data = std::make_shared<Data>();
+
+        if (line.empty())
+        {
+            std::cerr << "Invalid data: " << line << std::endl;
+            return data;
+        }
+
+        // Define maps to store label encodings for the categorical columns
+        std::unordered_map<std::string, int> protocolType;
+        std::unordered_map<std::string, int> service;
+        std::unordered_map<std::string, int> flag;
+
+        int protocolTypeCounter = 0;
+        int serviceCounter = 0;
+        int flagCounter = 0;
+        
+        
+        std::istringstream ss(line);
+        std::string token;
+        
+        std::vector<std::string> fields; // store all the fields in avector
+
+        while (std::getline(ss, token, ','))
+        {
+            fields.push_back(token);
+        }
+
+        // parse the data point features
+        if (fields.size() == 41)
+        {
+            // Encode protocol type
+            if (protocolType.find(fields[1]) == protocolType.end())
+            {
+                protocolType[fields[1]] = protocolTypeCounter++;
+            }
+            data->AppendToFeatureVector(protocolType[fields[1]]);
+
+            // Encode service
+            if (service.find(fields[2]) == service.end())
+            {
+                service[fields[2]] = serviceCounter++;
+            }
+            data->AppendToFeatureVector(service[fields[2]]);
+
+            // Encode flag
+            if (flag.find(fields[3]) == flag.end())
+            {
+                flag[fields[3]] = flagCounter++;
+            }
+            data->AppendToFeatureVector(flag[fields[3]]);
+
+            // parse and convert each field to a double and append it to the feature vector
+            for (size_t i = 4; i < fields.size(); i++)
+            {
+                try
+                {
+                    double value = std::stod(fields[i]);
+                    data->AppendToFeatureVector(value);
+                }
+                catch (const std::invalid_argument e)
+                {
+                    std::cerr << "Invalid argument: " << e.what() << " for field: " << fields[i] << std::endl;
+                    continue;
+                }
+            }
+
+        }
+        
+        std::cout << "Successfully read and stored feature vectors, " << dataArray->size() << std::endl;
+        return data;
+    }
+
+    std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> DataHandler::ReadFeatureVector(std::string path)
     {
         std::ifstream file(path);        
 
         if (!file.is_open())
         {
             std::cerr << "Failed to open the CSV file: " << path << std::endl;
-            return;
+            return testData;
         }
 
         std::string line;
@@ -1960,7 +2106,7 @@ namespace DataCollection
             }
 
             // parse the data point features
-            if (fields.size() == 42)
+            if (fields.size() == 41)
             {
                 // Encode protocol type
                 if (protocolType.find(fields[1]) == protocolType.end())
@@ -1984,7 +2130,7 @@ namespace DataCollection
                 data->AppendToFeatureVector(flag[fields[3]]);
 
                 // parse and convert each field to a double and append it to the feature vector
-                for (size_t i = 4; i < fields.size() - 1; i++)
+                for (size_t i = 4; i < fields.size(); i++)
                 {
                     try
                     {
@@ -1998,12 +2144,14 @@ namespace DataCollection
                     }
                 }
 
-                dataArray->push_back(data);
+                testData->push_back(data);                
+                //dataArray->push_back(data);
+               
             }            
             
         }
-
         std::cout << "Successfully read and stored feature vectors, " << dataArray->size() << std::endl;
+        return testData;        
        
     }
 

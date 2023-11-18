@@ -56,27 +56,37 @@ namespace PacketAnalyzer
 
 	void KNN::FindKNearest(std::shared_ptr<DataCollection::Data> queryPoint)
 	{
-		neighbors = std::make_shared<std::vector<std::shared_ptr<DataCollection::Data>>>();
-		double min = std::numeric_limits<double>::max();
+		// a vector to store distances and corresponding data points
+		std::vector<std::pair<double, std::shared_ptr<DataCollection::Data>>> distancesAndPoints;
 
-		for (int i = 0; i < k; i++) {
-			int index = -1;
-			for (int j = 0; j < trainingData->size(); j++) {
+		// storing the distances and corresponding data points
+		if (trainingData != nullptr)
+		{
+			for (int j = 0; j < trainingData->size(); j++)
+			{
 				double distance = CalculateDistance(queryPoint, trainingData->at(j), DistanceMetric::EUCLID);
-				trainingData->at(j)->SetDistance(distance);
-
-				if (distance < min) {
-					min = distance;
-					index = j;
-				}
-			}
-
-			if (index != -1) {
-				neighbors->push_back(trainingData->at(index));
-				min = std::numeric_limits<double>::max();
+				distancesAndPoints.emplace_back(distance, trainingData->at(j));
 			}
 		}
+		else
+		{
+			std::cout << "No training data" << std::endl;
+			return;
+		}
+		
+
+		// sort distances and take the top k neighbors
+		std::sort(distancesAndPoints.begin(), distancesAndPoints.end(), [](const auto& a, const auto& b) {return a.first < b.first; });
+
+		// Extract k neighbors
+		neighbors = std::make_shared<std::vector<std::shared_ptr<DataCollection::Data>>>();
+
+		for (int i = 0; i < k; i++)
+		{
+			neighbors->push_back(distancesAndPoints[i].second);
+		}
 	}
+
 
 	void KNN::SetTrainingData(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>> vect)
 	{
@@ -100,34 +110,30 @@ namespace PacketAnalyzer
 
 	std::string KNN::Predict() // return predicted class
 	{
+		// Ensure neighbors is not empty
+		if (neighbors->empty() || neighbors == nullptr)
+		{
+			std::cerr << "Error: No neighbors to make a prediction." << std::endl;
+			return ""; // You might want to handle this case appropriately
+		}
+
+		// Create a map to store the count of each label
 		std::map<std::string, int> classFreq;
-		for (int i = 0; i < neighbors->size(); i++)
+
+		// Count occurrences of each label among neighbors
+		for (const auto& neighbor : *neighbors) 
 		{
-			if (classFreq.find(neighbors->at(i)->GetLabel()) == classFreq.end())
-			{
-				classFreq[neighbors->at(i)->GetLabel()] = 1;
-			}
-			else
-			{
-				classFreq[neighbors->at(i)->GetLabel()]++;
-			}
+			std::string label = neighbor->GetLabel();
+			classFreq[label]++;
 		}
 
-		std::string best;
-		int max = 0;
-
-		for (auto kv : classFreq)
-		{
-			if (kv.second > max)
-			{
-				max = kv.second;
-				best = kv.first;
-			}
-		}
-		neighbors->clear();
-		return best;
+		// Count occurrences with the maximum count(majority vote)
+		auto best = std::max_element(classFreq.begin(), classFreq.end(), [](const auto& a, const auto& b) {return a.second < b.second; });
+		
+		return best->first;
 	}
 
+	// calculate the distance from the current datapoint to a given training datapoint
 	double KNN::CalculateDistance(std::shared_ptr<DataCollection::Data> queryPoint, std::shared_ptr<DataCollection::Data> input, DistanceMetric metric)
 	{
 		double distance = 0.0;
@@ -170,6 +176,45 @@ namespace PacketAnalyzer
 		return predictedLabels;
 	}
 
+	std::string KNN::InspectDataPoint(std::shared_ptr<DataCollection::Data> data)
+	{
+		// Log start of testing
+		std::cout << "Starting performance testing" << std::endl;
+
+		std::string prediction;
+
+		// clear the lists to store the true predicted labels
+		trueLabels.clear();
+		predictedLabels.clear();
+
+		// Initialize variables for silhouette score calculation
+		double totalSilhouetteScore = 0.0;
+
+		
+		FindKNearest(data);
+		prediction = Predict();
+
+		trueLabels.push_back(data->GetLabel());
+		predictedLabels.push_back(prediction);
+
+		// Calculate silhouette score for the current test data point
+		double silhouetteScore = CalculateSilhouetteScore(data);
+		totalSilhouetteScore += silhouetteScore;
+
+		neighbors->clear();			
+
+		// Calculate and log average silhouette score
+		double averageSilhouetteScore = totalSilhouetteScore;//  / testData->size();
+		std::cout << "Average Silhouette Score: " << averageSilhouetteScore * 100 << "%" << std::endl;
+
+		std::cout << "Predicted value: " << prediction << std::endl;
+
+		// Log end of testing
+		std::cout << "Finished performance testing" << std::endl;
+
+		return prediction;
+	}
+
 	double KNN::ValidatePerformance()
 	{
 		double currentPerformance = 0;
@@ -192,7 +237,45 @@ namespace PacketAnalyzer
 		return currentPerformance;
 	}
 
-	double KNN::TestPerformance()
+	double KNN::CalculateSilhouetteScore(std::shared_ptr<DataCollection::Data> queryPoint)
+	{
+		const int numNeighbors = neighbors->size();
+
+		if (numNeighbors == 0 || numNeighbors >= trainingData->size()) {
+			std::cerr << "Error: Invalid number of neighbors for silhouette score calculation." << std::endl;
+			return 0.0;
+		}
+
+		double silhouetteScore = 0.0;
+
+		for (int i = 0; i < numNeighbors; ++i)
+		{
+			double a = CalculateDistance(queryPoint, neighbors->at(i), DistanceMetric::EUCLID);
+
+			// Calculate average distance to other data points in the training set
+			std::vector<double> distancesToOthers;
+			for (int j = 0; j < trainingData->size(); ++j)
+			{
+				if (std::find(neighbors->begin(), neighbors->end(), trainingData->at(j)) == neighbors->end()) 
+				{
+					distancesToOthers.push_back(CalculateDistance(queryPoint, trainingData->at(j), DistanceMetric::EUCLID));
+				}
+			}
+
+			double b = distancesToOthers.empty() ? 0.0 : std::accumulate(distancesToOthers.begin(), distancesToOthers.end(), 0.0) / distancesToOthers.size();
+
+			// Calculate silhouette score for the current neighbor
+			double currentScore = (b - a) / std::max(a, b);
+			silhouetteScore += currentScore;
+		}
+
+		// Average silhouette score over all neighbors
+		silhouetteScore /= numNeighbors;
+
+		return silhouetteScore;
+	}
+
+	double KNN::TestPerformance(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& testData)
 	{
 		// Log start of testing
 		std::cout << "Starting performance testing" << std::endl;
@@ -210,7 +293,10 @@ namespace PacketAnalyzer
 		trueLabels.clear();
 		predictedLabels.clear();
 
-		for (std::shared_ptr<DataCollection::Data> queryPoint: *testData)
+		// Initialize variables for silhouette score calculation
+		double totalSilhouetteScore = 0.0;
+
+		for (std::shared_ptr<DataCollection::Data> queryPoint : *testData)
 		{
 			FindKNearest(queryPoint);
 			std::string prediction = Predict();
@@ -221,47 +307,58 @@ namespace PacketAnalyzer
 			{
 				count++;
 			}
+
+			// Calculate silhouette score for the current test data point
+			double silhouetteScore = CalculateSilhouetteScore(queryPoint);
+			totalSilhouetteScore += silhouetteScore;
+
+			neighbors->clear();
 		}
-		accuracy = static_cast<double>(count) / testData->size();
 
-		currentPerformance = ((double)count * 100) / ((double)testData->size());
-		printf("Test performance = %.3f %%\n", currentPerformance);
+		// Calculate and log average silhouette score
+		double averageSilhouetteScore = totalSilhouetteScore / testData->size();
+		std::cout << "Average Silhouette Score: " << averageSilhouetteScore * 100 << "%" << std::endl;
 
-		// log accuracy
-		std::cout << "Accuracy: " << accuracy * 100 <<  std::endl;
-
-		// Calculate and log precision
-		precision = CalculatePrecision(testData);
-		std::cout << "Precision: " << precision * 100 << std::endl;
-
-		// Calculate and log recall
-		recall = CalculateRecall(testData);
-		std::cout << "Recall: " << recall * 100 << std::endl;
-
-		// Calculate and log F1 score
-		f1Score = CalculateF1Score(testData);
-		std::cout << "F1 Score: " << f1Score << std::endl;
-
-		// Calculate and log confusion matrix
-		CalculateConfusionMatrix(testData, confusionMatrix);
-		std::cout << "Confusion matrix:" << std::endl;
-		for (auto& row : confusionMatrix) 
-		{
-			for (auto count : row) 
-			{
-				std::cout << count << " ";
-			}
-			std::cout << std::endl;
-		}
+		//accuracy = static_cast<double>(count) / testData->size();
+		//
+		//currentPerformance = ((double)count * 100) / ((double)testData->size());
+		//printf("Test performance = %.3f %%\n", currentPerformance);
+		//
+		//// log accuracy
+		//std::cout << "Accuracy: " << accuracy * 100 <<  std::endl;
+		//
+		//// Calculate and log precision
+		//precision = CalculatePrecision(testData);
+		//std::cout << "Precision: " << precision * 100 << std::endl;
+		//
+		//// Calculate and log recall
+		//recall = CalculateRecall(testData);
+		//std::cout << "Recall: " << recall * 100 << std::endl;
+		//
+		//// Calculate and log F1 score
+		//f1Score = CalculateF1Score(testData);
+		//std::cout << "F1 Score: " << f1Score << std::endl;
+		//
+		//// Calculate and log confusion matrix
+		//CalculateConfusionMatrix(testData, confusionMatrix);
+		//std::cout << "Confusion matrix:" << std::endl;
+		//for (auto& row : confusionMatrix) 
+		//{
+		//	for (auto count : row) 
+		//	{
+		//		std::cout << count << " ";
+		//	}
+		//	std::cout << std::endl;
+		//}
 
 		// Log end of testing
 		std::cout << "Finished performance testing" << std::endl;
 
-		return currentPerformance;
+		return averageSilhouetteScore;
 	}
 
 	// Calculate precision
-	double KNN::CalculatePrecision(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data) {
+	double KNN::CalculatePrecision(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data) {
 		if (!data || !data->size()) 
 		{
 			std::cerr << "Error: Invalid data or label input." << std::endl;
@@ -294,7 +391,7 @@ namespace PacketAnalyzer
 	}
 
 	// Calculate recall
-	double KNN::CalculateRecall(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data) {
+	double KNN::CalculateRecall(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data) {
 		if (!data || !data->size()) 
 		{
 			std::cerr << "Error: Invalid data or label input." << std::endl;
@@ -327,7 +424,7 @@ namespace PacketAnalyzer
 	}
 
 	// Calculate F1-score
-	double KNN::CalculateF1Score(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data)
+	double KNN::CalculateF1Score(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data)
 	{
 		if (!data || !data->size())
 		{
@@ -347,7 +444,7 @@ namespace PacketAnalyzer
 	}
 
 	// Calculate confusion matrix
-	void KNN::CalculateConfusionMatrix(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data, std::vector<std::vector<int>>& confusionMatrix) 
+	void KNN::CalculateConfusionMatrix(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& data, std::vector<std::vector<int>>& confusionMatrix)
 	{
 		if (!data || !data->size()) 
 		{

@@ -3,7 +3,7 @@ Cyber-shield.sln
 network_traffic_classification.pdf
 npcap-sdk
 x64
-network_logs.txt
+CSLs.txt
 main.cpp
 Cyber-Shield.vcxproj
 Cyber-Shield.vcxproj.filters

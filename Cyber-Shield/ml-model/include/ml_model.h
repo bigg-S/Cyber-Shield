@@ -5,6 +5,7 @@
 #include <limits>
 #include <map>
 #include <stdint.h>
+#include <numeric>
 
 #include "data.h"
 
@@ -47,12 +48,15 @@ namespace PacketAnalyzer
 		std::string Predict(); // return predicted class
 		double CalculateDistance(std::shared_ptr<DataCollection::Data> queryPoint, std::shared_ptr<DataCollection::Data> input, DistanceMetric metric);
 		double ValidatePerformance();
-		double TestPerformance();
+		double CalculateSilhouetteScore(std::shared_ptr<DataCollection::Data> queryPoint);
+		double TestPerformance(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>& testData);
+
+		std::string InspectDataPoint(std::shared_ptr<DataCollection::Data>);
 		
-		double CalculatePrecision(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&); // Calculate precision		
-		double CalculateRecall(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&); // Calculate recall		
-		double CalculateF1Score(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&); // Calculate F1 score		
-		void CalculateConfusionMatrix(std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&, std::vector<std::vector<int>>&); // Calculate confusion matrix		
+		double CalculatePrecision(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&); // Calculate precision		
+		double CalculateRecall(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&); // Calculate recall		
+		double CalculateF1Score(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&); // Calculate F1 score		
+		void CalculateConfusionMatrix(const std::shared_ptr<std::vector<std::shared_ptr<DataCollection::Data>>>&, std::vector<std::vector<int>>&); // Calculate confusion matrix		
 		double CrossValidation(int); // Calculate Cross-validation
 
 		const std::vector<std::string>& GetTrueLabels() const;

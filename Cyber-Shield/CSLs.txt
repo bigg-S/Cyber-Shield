@@ -1,0 +1,222 @@
+Invalid protocol
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Invalid protocol
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Unknown versionUnsupported link layer protocol
+
+
+Unknown fragment or urgent flagUnknown fragment or urgent flag
+
+Invalid payload
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Connections vector is emptyInvalid payload
+
+Error: Invalid numConnections
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Unknown version
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Connections vector is empty
+Error: Invalid numConnections
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Connections vector is empty
+Error: Invalid numConnections
+Connections vector is empty
+Error: Invalid numConnections
+Invalid protocol
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Invalid protocol
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
+Connections vector is empty
+Error: Invalid numConnections
+Unsupported link layer protocol
+
+Unknown fragment or urgent flag
+Invalid payload
